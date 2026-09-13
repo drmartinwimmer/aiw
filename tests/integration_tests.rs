@@ -1,52 +1,45 @@
-#![expect(
-    clippy::panic_in_result_fn,
-    reason = "Integration tests use assertions alongside ? error propagation"
-)]
-
 use std::path::Path;
 use std::process::{Command, Output};
 
-fn init_test_jj_repo(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn init_test_jj_repo(path: &Path) {
     let output = Command::new("jj")
         .args(["--no-pager", "git", "init"])
         .arg(path)
-        .output()?;
+        .output()
+        .expect("execute jj git init");
 
     if !output.status.success() {
         let fallback = Command::new("jj")
             .args(["--no-pager", "init", "--git"])
             .arg(path)
-            .output()?;
-        if !fallback.status.success() {
-            return Err(format!(
-                "Failed to initialize Jujutsu repository: {}",
-                String::from_utf8_lossy(&fallback.stderr)
-            )
-            .into());
-        }
+            .output()
+            .expect("execute fallback jj init --git");
+        assert!(
+            fallback.status.success(),
+            "Failed to initialize Jujutsu repository: {}",
+            String::from_utf8_lossy(&fallback.stderr)
+        );
     }
-    Ok(())
 }
 
-fn run_aiw(cwd: &Path, args: &[&str]) -> Result<Output, Box<dyn std::error::Error>> {
-    let output = Command::new(env!("CARGO_BIN_EXE_aiw"))
+fn run_aiw(cwd: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_aiw"))
         .args(args)
         .current_dir(cwd)
-        .output()?;
-    Ok(output)
+        .output()
+        .expect("execute aiw binary")
 }
 
 #[test]
-fn workspace_creation_and_dry_run_in_real_jj_repo_succeeds()
--> Result<(), Box<dyn std::error::Error>> {
-    let temp_dir = tempfile::tempdir()?;
+fn workspace_creation_and_dry_run_in_real_jj_repo_succeeds() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
     let repo_root = temp_dir.path();
-    init_test_jj_repo(repo_root)?;
+    init_test_jj_repo(repo_root);
 
     let config_content = r#"{"tools": ["cargo", "rustc"]}"#;
-    std::fs::write(repo_root.join("aiw.json"), config_content)?;
+    std::fs::write(repo_root.join("aiw.json"), config_content).expect("write aiw.json");
 
-    let output = run_aiw(repo_root, &["agy", "test-workspace", "--dry-run"])?;
+    let output = run_aiw(repo_root, &["agy", "test-workspace", "--dry-run"]);
     assert!(
         output.status.success(),
         "aiw agy --dry-run failed with stderr: {}",
@@ -96,21 +89,19 @@ fn workspace_creation_and_dry_run_in_real_jj_repo_succeeds()
         stdout.contains("agy"),
         "Dry-run output must invoke target agy"
     );
-
-    Ok(())
 }
 
 #[test]
-fn idempotent_workspace_reuse_in_real_jj_repo_succeeds() -> Result<(), Box<dyn std::error::Error>> {
-    let temp_dir = tempfile::tempdir()?;
+fn idempotent_workspace_reuse_in_real_jj_repo_succeeds() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
     let repo_root = temp_dir.path();
-    init_test_jj_repo(repo_root)?;
+    init_test_jj_repo(repo_root);
 
     let config_content = r#"{"tools": ["cargo"]}"#;
-    std::fs::write(repo_root.join("aiw.json"), config_content)?;
+    std::fs::write(repo_root.join("aiw.json"), config_content).expect("write aiw.json");
 
     // Initial run creates workspace
-    let first_output = run_aiw(repo_root, &["agy", "reused-workspace", "--dry-run"])?;
+    let first_output = run_aiw(repo_root, &["agy", "reused-workspace", "--dry-run"]);
     assert!(
         first_output.status.success(),
         "First run failed: {}",
@@ -125,7 +116,7 @@ fn idempotent_workspace_reuse_in_real_jj_repo_succeeds() -> Result<(), Box<dyn s
     );
 
     // Second run should idempotently succeed and reuse workspace
-    let second_output = run_aiw(repo_root, &["agy", "reused-workspace", "--dry-run"])?;
+    let second_output = run_aiw(repo_root, &["agy", "reused-workspace", "--dry-run"]);
     assert!(
         second_output.status.success(),
         "Second run failed: {}",
@@ -142,23 +133,22 @@ fn idempotent_workspace_reuse_in_real_jj_repo_succeeds() -> Result<(), Box<dyn s
     let ws_list = Command::new("jj")
         .args(["--no-pager", "workspace", "list"])
         .current_dir(repo_root)
-        .output()?;
+        .output()
+        .expect("jj workspace list");
     assert!(ws_list.status.success());
     let list_stdout = String::from_utf8_lossy(&ws_list.stdout);
     assert!(
         list_stdout.contains("reused-workspace"),
         "jj workspace list must contain reused-workspace"
     );
-
-    Ok(())
 }
 
 #[test]
-fn missing_jj_repository_fails_with_clear_error() -> Result<(), Box<dyn std::error::Error>> {
-    let temp_dir = tempfile::tempdir()?;
+fn missing_jj_repository_fails_with_clear_error() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
     let non_repo = temp_dir.path();
 
-    let output = run_aiw(non_repo, &["agy", "test-workspace", "--dry-run"])?;
+    let output = run_aiw(non_repo, &["agy", "test-workspace", "--dry-run"]);
     assert!(
         !output.status.success(),
         "aiw must fail outside a Jujutsu repository"
@@ -175,20 +165,18 @@ fn missing_jj_repository_fails_with_clear_error() -> Result<(), Box<dyn std::err
         "stderr must contain clear error message, got: {}",
         stderr
     );
-
-    Ok(())
 }
 
 #[test]
-fn missing_tool_in_config_fails_with_diagnostic_error() -> Result<(), Box<dyn std::error::Error>> {
-    let temp_dir = tempfile::tempdir()?;
+fn missing_tool_in_config_fails_with_diagnostic_error() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
     let repo_root = temp_dir.path();
-    init_test_jj_repo(repo_root)?;
+    init_test_jj_repo(repo_root);
 
     let config_content = r#"{"tools": ["non_existent_tool_xyz123"]}"#;
-    std::fs::write(repo_root.join("aiw.json"), config_content)?;
+    std::fs::write(repo_root.join("aiw.json"), config_content).expect("write aiw.json");
 
-    let output = run_aiw(repo_root, &["agy", "test-workspace", "--dry-run"])?;
+    let output = run_aiw(repo_root, &["agy", "test-workspace", "--dry-run"]);
     assert!(
         !output.status.success(),
         "aiw must fail when a configured tool is missing"
@@ -207,19 +195,17 @@ fn missing_tool_in_config_fails_with_diagnostic_error() -> Result<(), Box<dyn st
         "stderr must indicate the specific missing tool, got: {}",
         stderr
     );
-
-    Ok(())
 }
 
 #[test]
-fn invalid_config_json_fails_with_parse_error() -> Result<(), Box<dyn std::error::Error>> {
-    let temp_dir = tempfile::tempdir()?;
+fn invalid_config_json_fails_with_parse_error() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
     let repo_root = temp_dir.path();
-    init_test_jj_repo(repo_root)?;
+    init_test_jj_repo(repo_root);
 
-    std::fs::write(repo_root.join("aiw.json"), "not valid json {")?;
+    std::fs::write(repo_root.join("aiw.json"), "not valid json {").expect("write bad json");
 
-    let output = run_aiw(repo_root, &["agy", "test-workspace", "--dry-run"])?;
+    let output = run_aiw(repo_root, &["agy", "test-workspace", "--dry-run"]);
     assert!(
         !output.status.success(),
         "aiw must fail when aiw.json has invalid JSON"
@@ -232,27 +218,24 @@ fn invalid_config_json_fails_with_parse_error() -> Result<(), Box<dyn std::error
         "stderr must contain JSON parsing diagnostic, got: {}",
         stderr
     );
-
-    Ok(())
 }
 
 #[test]
-fn live_bwrap_execution_in_temp_workspace_runs_and_verifies_containment()
--> Result<(), Box<dyn std::error::Error>> {
+fn live_bwrap_execution_in_temp_workspace_runs_and_verifies_containment() {
     if which::which("bwrap").is_err() || which::which("agy").is_err() {
         eprintln!("Skipping live_bwrap_execution test: bwrap or agy not found in PATH");
-        return Ok(());
+        return;
     }
 
-    let temp_dir = tempfile::tempdir()?;
+    let temp_dir = tempfile::tempdir().expect("tempdir");
     let repo_root = temp_dir.path();
-    init_test_jj_repo(repo_root)?;
+    init_test_jj_repo(repo_root);
 
     let config_content = r#"{"tools": ["cargo"]}"#;
-    std::fs::write(repo_root.join("aiw.json"), config_content)?;
+    std::fs::write(repo_root.join("aiw.json"), config_content).expect("write aiw.json");
 
     // Invoke live container execution forwarding `--version` to agy inside the sandbox
-    let output = run_aiw(repo_root, &["agy", "live-workspace", "--", "--version"])?;
+    let output = run_aiw(repo_root, &["agy", "live-workspace", "--", "--version"]);
 
     assert!(
         output.status.success(),
@@ -276,20 +259,18 @@ fn live_bwrap_execution_in_temp_workspace_runs_and_verifies_containment()
         ws_path.join(".jj").exists(),
         "Workspace must contain valid .jj repository link"
     );
-
-    Ok(())
 }
 
 #[test]
-fn config_with_default_tools_and_network_flag_in_real_repo() -> Result<(), Box<dyn std::error::Error>> {
-    let temp_dir = tempfile::tempdir()?;
+fn config_with_default_tools_and_network_flag_in_real_repo() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
     let repo_root = temp_dir.path();
-    init_test_jj_repo(repo_root)?;
+    init_test_jj_repo(repo_root);
 
     let config_content = r#"{"default_tools": true, "network": true}"#;
-    std::fs::write(repo_root.join("aiw.json"), config_content)?;
+    std::fs::write(repo_root.join("aiw.json"), config_content).expect("write aiw.json");
 
-    let output = run_aiw(repo_root, &["agy", "default-tools-ws", "--dry-run"])?;
+    let output = run_aiw(repo_root, &["agy", "default-tools-ws", "--dry-run"]);
     assert!(
         output.status.success(),
         "aiw agy failed with stderr: {}",
@@ -301,20 +282,18 @@ fn config_with_default_tools_and_network_flag_in_real_repo() -> Result<(), Box<d
         stdout.contains("--share-net"),
         "Dry-run output must contain --share-net when network is true"
     );
-
-    Ok(())
 }
 
 #[test]
-fn config_with_network_false_omits_share_net_in_dry_run() -> Result<(), Box<dyn std::error::Error>> {
-    let temp_dir = tempfile::tempdir()?;
+fn config_with_network_false_omits_share_net_in_dry_run() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
     let repo_root = temp_dir.path();
-    init_test_jj_repo(repo_root)?;
+    init_test_jj_repo(repo_root);
 
     let config_content = r#"{"tools": ["cargo"], "network": false}"#;
-    std::fs::write(repo_root.join("aiw.json"), config_content)?;
+    std::fs::write(repo_root.join("aiw.json"), config_content).expect("write aiw.json");
 
-    let output = run_aiw(repo_root, &["agy", "no-net-ws", "--dry-run"])?;
+    let output = run_aiw(repo_root, &["agy", "no-net-ws", "--dry-run"]);
     assert!(
         output.status.success(),
         "aiw agy failed with stderr: {}",
@@ -326,6 +305,4 @@ fn config_with_network_false_omits_share_net_in_dry_run() -> Result<(), Box<dyn 
         !stdout.contains("--share-net"),
         "Dry-run output must omit --share-net when network is false"
     );
-
-    Ok(())
 }
