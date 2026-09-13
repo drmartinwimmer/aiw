@@ -87,56 +87,58 @@ fn main() -> ExitCode {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::panic_in_result_fn,
+    reason = "Test functions use assertions alongside ? error propagation"
+)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_agy_subcommand_minimal() {
-        let cli = Cli::try_parse_from(["aiw", "agy", "my-workspace"]);
-        match cli {
-            Ok(Cli {
-                command:
-                    Commands::Agy {
-                        workspace_name,
-                        dry_run,
-                        extra_args,
-                    },
-            }) => {
-                assert_eq!(workspace_name, "my-workspace");
-                assert!(!dry_run);
-                assert!(extra_args.is_empty());
-            }
-            Err(err) => {
-                assert_eq!(err.to_string(), "");
-            }
-        }
+    fn parse_agy_subcommand_minimal_succeeds() -> Result<(), Box<dyn std::error::Error>> {
+        let Cli {
+            command:
+                Commands::Agy {
+                    workspace_name,
+                    dry_run,
+                    extra_args,
+                },
+        } = Cli::try_parse_from(["aiw", "agy", "my-workspace"])?;
+
+        assert_eq!(workspace_name, "my-workspace");
+        assert!(!dry_run);
+        assert!(extra_args.is_empty());
+        Ok(())
     }
 
     #[test]
-    fn test_parse_agy_subcommand_with_dry_run_flag() {
-        let cli = Cli::try_parse_from(["aiw", "agy", "my-workspace", "--dry-run"]);
-        match cli {
-            Ok(Cli {
-                command:
-                    Commands::Agy {
-                        workspace_name,
-                        dry_run,
-                        extra_args,
-                    },
-            }) => {
-                assert_eq!(workspace_name, "my-workspace");
-                assert!(dry_run);
-                assert!(extra_args.is_empty());
-            }
-            Err(err) => {
-                assert_eq!(err.to_string(), "");
-            }
-        }
+    fn parse_agy_subcommand_with_dry_run_flag_succeeds() -> Result<(), Box<dyn std::error::Error>> {
+        let Cli {
+            command:
+                Commands::Agy {
+                    workspace_name,
+                    dry_run,
+                    extra_args,
+                },
+        } = Cli::try_parse_from(["aiw", "agy", "my-workspace", "--dry-run"])?;
+
+        assert_eq!(workspace_name, "my-workspace");
+        assert!(dry_run);
+        assert!(extra_args.is_empty());
+        Ok(())
     }
 
     #[test]
-    fn test_parse_agy_subcommand_with_dry_run_and_extra_args() {
-        let cli = Cli::try_parse_from([
+    fn parse_agy_subcommand_with_dry_run_and_extra_args_succeeds()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let Cli {
+            command:
+                Commands::Agy {
+                    workspace_name,
+                    dry_run,
+                    extra_args,
+                },
+        } = Cli::try_parse_from([
             "aiw",
             "agy",
             "feature-1",
@@ -144,41 +146,34 @@ mod tests {
             "--",
             "--model",
             "gemini-2.5",
-        ]);
-        match cli {
-            Ok(Cli {
-                command:
-                    Commands::Agy {
-                        workspace_name,
-                        dry_run,
-                        extra_args,
-                    },
-            }) => {
-                assert_eq!(workspace_name, "feature-1");
-                assert!(dry_run);
-                assert_eq!(extra_args, vec!["--model", "gemini-2.5"]);
-            }
-            Err(err) => {
-                assert_eq!(err.to_string(), "");
-            }
-        }
+        ])?;
+
+        assert_eq!(workspace_name, "feature-1");
+        assert!(dry_run);
+        assert_eq!(extra_args, vec!["--model", "gemini-2.5"]);
+        Ok(())
     }
 
     #[test]
-    fn test_parse_missing_subcommand_fails() {
-        let cli = Cli::try_parse_from(["aiw"]);
-        match cli {
-            Err(_) => {}
-            Ok(_) => assert_eq!("expected parse failure", "parsed successfully"),
-        }
+    fn parse_missing_subcommand_fails_with_missing_subcommand_kind()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let Err(err) = Cli::try_parse_from(["aiw"]) else {
+            return Err("expected parse failure for missing subcommand".into());
+        };
+        assert_eq!(
+            err.kind(),
+            clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+        );
+        Ok(())
     }
 
     #[test]
-    fn test_parse_missing_workspace_name_fails() {
-        let cli = Cli::try_parse_from(["aiw", "agy"]);
-        match cli {
-            Err(_) => {}
-            Ok(_) => assert_eq!("expected parse failure", "parsed successfully"),
-        }
+    fn parse_missing_workspace_name_fails_with_missing_required_argument_kind()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let Err(err) = Cli::try_parse_from(["aiw", "agy"]) else {
+            return Err("expected parse failure for missing workspace name".into());
+        };
+        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+        Ok(())
     }
 }

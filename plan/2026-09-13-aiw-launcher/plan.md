@@ -23,9 +23,9 @@
 
 ### Milestone 2: Sandbox Engine, CLI Entrypoint & Hermetic Integration Tests
 - **Description:** Implement tool resolution, Nix compatibility, Bubblewrap argument generation and execution, CLI argument parsing, and end-to-end hermetic integration tests.
-- **Status:** `[ ] Pending`
+- **Status:** `[x] Done`
 - **Target Completion Date:** 2026-09-13
-- **Actual Completion Date:** -
+- **Actual Completion Date:** 2026-09-13
 - **Dependencies:** Milestone 1
 - **Tasks File:** [M2.md](file:///home/martin/dev/rust/aiw/plan/2026-09-13-aiw-launcher/M2.md)
 - **Feedback File:** [FEEDBACK_M2.md](file:///home/martin/dev/rust/aiw/plan/2026-09-13-aiw-launcher/FEEDBACK_M2.md)

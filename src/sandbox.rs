@@ -310,9 +310,8 @@ mod tests {
         if expected.is_empty() {
             return true;
         }
-        args.windows(expected.len()).any(|window| {
-            window.iter().zip(expected.iter()).all(|(a, b)| a == b)
-        })
+        args.windows(expected.len())
+            .any(|window| window.iter().zip(expected.iter()).all(|(a, b)| a == b))
     }
 
     #[test]
@@ -383,7 +382,10 @@ mod tests {
         assert!(contains_subslice(&args, &["--bind", &jj_str, &jj_str]));
 
         let gemini_str = home_dir.join(".gemini").display().to_string();
-        assert!(contains_subslice(&args, &["--bind", &gemini_str, &gemini_str]));
+        assert!(contains_subslice(
+            &args,
+            &["--bind", &gemini_str, &gemini_str]
+        ));
 
         // Working directory
         assert!(contains_subslice(&args, &["--chdir", &ws_str]));
