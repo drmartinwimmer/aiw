@@ -84,12 +84,14 @@ impl<'a> SandboxBuilder<'a> {
             "/etc/resolv.conf",
             "/etc/hosts",
             "/etc/ssl",
+            "/etc/pki",
             "/etc/static",
             "/etc/passwd",
             "/etc/group",
             "/etc/nix",
             "/etc/profiles/per-user",
             "/run/systemd/resolve",
+            "/var/run/nscd",
         ];
 
         for path_str in &ro_system_paths {
@@ -145,13 +147,33 @@ impl<'a> SandboxBuilder<'a> {
         if let Some(ref home) = home_path {
             let gemini_dir = home.join(".gemini");
             if !gemini_dir.exists() {
-                let _ = std::fs::create_dir_all(&gemini_dir);
+                match std::fs::create_dir_all(&gemini_dir) {
+                    Ok(()) | Err(_) => {}
+                }
             }
             if gemini_dir.exists() {
                 let gemini_str = gemini_dir.display().to_string();
                 args.push("--bind".to_string());
                 args.push(gemini_str.clone());
                 args.push(gemini_str);
+            }
+
+            let keyrings_dir = home.join(".local/share/keyrings");
+            if keyrings_dir.exists() {
+                let keyrings_str = keyrings_dir.display().to_string();
+                args.push("--bind".to_string());
+                args.push(keyrings_str.clone());
+                args.push(keyrings_str);
+            }
+        }
+
+        // DBus / Secret Service keyring support for OAuth tokens
+        if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
+            let runtime_path = PathBuf::from(&runtime_dir);
+            if runtime_path.exists() {
+                args.push("--bind".to_string());
+                args.push(runtime_dir.clone());
+                args.push(runtime_dir);
             }
         }
 
@@ -185,6 +207,8 @@ impl<'a> SandboxBuilder<'a> {
             "SSL_CERT_FILE",
             "NIX_SSL_CERT_FILE",
             "NIX_PATH",
+            "DBUS_SESSION_BUS_ADDRESS",
+            "XDG_RUNTIME_DIR",
         ] {
             if let Ok(val) = std::env::var(var_name) {
                 args.push("--setenv".to_string());
