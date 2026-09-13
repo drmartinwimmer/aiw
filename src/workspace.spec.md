@@ -13,12 +13,13 @@ pub enum WorkspaceError {
     NotInJjRepo,
     #[error("Failed to execute Jujutsu command: {0}")]
     JjCommandFailed(String),
+    #[error("Invalid workspace name: {0}")]
+    InvalidWorkspaceName(String),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 }
 
-/// Finds the root directory of the enclosing Jujutsu repository.
-/// Scans parent directories for `.jj` or invokes `jj --no-pager root`.
+/// Finds the root directory of the enclosing Jujutsu repository by invoking `jj --no-pager root`.
 pub fn find_jj_root(start_dir: &Path) -> Result<PathBuf, WorkspaceError>;
 
 /// Ensures a workspace named `workspace_name` exists under `<repo_root>/.workspaces/<workspace-name>`.

@@ -14,9 +14,9 @@
 
 ### Milestone 1: Specifications, Config Loader & Workspace Management
 - **Description:** Establish project and module specifications, set up crate dependencies, implement `aiw.json` configuration loading, and build the Jujutsu workspace detection and creation logic.
-- **Status:** `[ ] Pending`
+- **Status:** `[x] Done`
 - **Target Completion Date:** 2026-09-13
-- **Actual Completion Date:** -
+- **Actual Completion Date:** 2026-09-13
 - **Dependencies:** None
 - **Tasks File:** [M1.md](file:///home/martin/dev/rust/aiw/plan/2026-09-13-aiw-launcher/M1.md)
 - **Feedback File:** [FEEDBACK_M1.md](file:///home/martin/dev/rust/aiw/plan/2026-09-13-aiw-launcher/FEEDBACK_M1.md)

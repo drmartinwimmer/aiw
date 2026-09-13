@@ -1,0 +1,258 @@
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, thiserror::Error)]
+pub enum WorkspaceError {
+    #[error("Not inside a Jujutsu repository")]
+    NotInJjRepo,
+    #[error("Failed to execute Jujutsu command: {0}")]
+    JjCommandFailed(String),
+    #[error("Invalid workspace name: {0}")]
+    InvalidWorkspaceName(String),
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+/// Finds the root directory of the enclosing Jujutsu repository by invoking `jj --no-pager root`.
+pub fn find_jj_root(start_dir: &Path) -> Result<PathBuf, WorkspaceError> {
+    let abs_dir = if start_dir.is_absolute() {
+        start_dir.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(start_dir)
+    };
+
+    let dir = if abs_dir.is_file() {
+        match abs_dir.parent() {
+            Some(parent) => parent.to_path_buf(),
+            None => abs_dir,
+        }
+    } else {
+        abs_dir
+    };
+
+    if !dir.exists() {
+        return Err(WorkspaceError::NotInJjRepo);
+    }
+
+    let output = match std::process::Command::new("jj")
+        .args(["--no-pager", "root"])
+        .current_dir(&dir)
+        .output()
+    {
+        Ok(out) => out,
+        Err(err) => return Err(WorkspaceError::Io(err)),
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr_lower = stderr.to_lowercase();
+        if stderr_lower.contains("no jj repo") || stderr_lower.contains("there is no jj repo") {
+            return Err(WorkspaceError::NotInJjRepo);
+        }
+        return Err(WorkspaceError::JjCommandFailed(stderr.trim().to_string()));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() {
+        return Err(WorkspaceError::JjCommandFailed(
+            "Empty output from jj root".to_string(),
+        ));
+    }
+
+    Ok(PathBuf::from(trimmed))
+}
+
+/// Ensures a workspace named `workspace_name` exists under `<repo_root>/.workspaces/<workspace-name>`.
+/// If it already exists, returns its absolute path.
+/// If not, invokes `jj --no-pager workspace add .workspaces/<workspace-name> --name <workspace-name>`.
+pub fn ensure_workspace(repo_root: &Path, workspace_name: &str) -> Result<PathBuf, WorkspaceError> {
+    if workspace_name.is_empty()
+        || workspace_name == "."
+        || workspace_name == ".."
+        || workspace_name.contains('/')
+        || workspace_name.contains('\\')
+    {
+        return Err(WorkspaceError::InvalidWorkspaceName(
+            workspace_name.to_string(),
+        ));
+    }
+
+    let abs_repo_root = if repo_root.is_absolute() {
+        repo_root.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(repo_root)
+    };
+
+    if !abs_repo_root.join(".jj").exists() {
+        return Err(WorkspaceError::NotInJjRepo);
+    }
+
+    let workspace_path = abs_repo_root.join(".workspaces").join(workspace_name);
+
+    if workspace_path.join(".jj").exists() {
+        return Ok(workspace_path);
+    }
+
+    let workspaces_dir = abs_repo_root.join(".workspaces");
+    std::fs::create_dir_all(&workspaces_dir)?;
+
+    let rel_workspace_path = Path::new(".workspaces").join(workspace_name);
+    let output = match std::process::Command::new("jj")
+        .args(["--no-pager", "workspace", "add"])
+        .arg(&rel_workspace_path)
+        .args(["--name", workspace_name])
+        .current_dir(&abs_repo_root)
+        .output()
+    {
+        Ok(out) => out,
+        Err(err) => return Err(WorkspaceError::Io(err)),
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr_lower = stderr.to_lowercase();
+        if stderr_lower.contains("no jj repo") || stderr_lower.contains("there is no jj repo") {
+            return Err(WorkspaceError::NotInJjRepo);
+        }
+        return Err(WorkspaceError::JjCommandFailed(stderr.trim().to_string()));
+    }
+
+    Ok(workspace_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn init_test_repo(path: &Path) {
+        let output = std::process::Command::new("jj")
+            .args(["--no-pager", "git", "init"])
+            .arg(path)
+            .output();
+
+        let success = matches!(output, Ok(out) if out.status.success());
+
+        if !success {
+            let fallback = std::process::Command::new("jj")
+                .args(["--no-pager", "init", "--git"])
+                .arg(path)
+                .output()
+                .expect("failed to run jj init or jj git init");
+            assert!(
+                fallback.status.success(),
+                "Failed to init jj repo: {}",
+                String::from_utf8_lossy(&fallback.stderr)
+            );
+        }
+    }
+
+    #[test]
+    fn find_jj_root_from_root_returns_root_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = dir.path();
+        init_test_repo(repo_root);
+
+        let found = find_jj_root(repo_root).expect("find_jj_root");
+        assert_eq!(found, repo_root);
+    }
+
+    #[test]
+    fn find_jj_root_from_deep_subdirectory_returns_root_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = dir.path();
+        init_test_repo(repo_root);
+
+        let sub = repo_root.join("sub1").join("sub2");
+        std::fs::create_dir_all(&sub).expect("create_dir_all");
+
+        let found = find_jj_root(&sub).expect("find_jj_root");
+        assert_eq!(found, repo_root);
+    }
+
+    #[test]
+    fn find_jj_root_outside_repo_returns_not_in_jj_repo_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let non_repo = dir.path();
+
+        let res = find_jj_root(non_repo);
+        assert!(matches!(res, Err(WorkspaceError::NotInJjRepo)));
+    }
+
+    #[test]
+    fn ensure_workspace_for_new_name_creates_workspace_and_registers_in_jj() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = dir.path();
+        init_test_repo(repo_root);
+
+        let ws_name = "ws-alpha";
+        let res = ensure_workspace(repo_root, ws_name).expect("ensure_workspace");
+        let expected_path = repo_root.join(".workspaces").join(ws_name);
+
+        assert_eq!(res, expected_path);
+        assert!(expected_path.exists());
+        assert!(expected_path.join(".jj").exists());
+
+        let output = std::process::Command::new("jj")
+            .args(["--no-pager", "workspace", "list"])
+            .current_dir(repo_root)
+            .output()
+            .expect("jj workspace list");
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains(ws_name),
+            "Workspace list does not contain {}: {}",
+            ws_name,
+            stdout
+        );
+    }
+
+    #[test]
+    fn ensure_workspace_when_already_exists_succeeds_idempotently() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = dir.path();
+        init_test_repo(repo_root);
+
+        let ws_name = "ws-beta";
+        let path1 = ensure_workspace(repo_root, ws_name).expect("first ensure");
+        let path2 = ensure_workspace(repo_root, ws_name).expect("second ensure");
+
+        assert_eq!(path1, path2);
+        assert!(path1.join(".jj").exists());
+    }
+
+    #[test]
+    fn ensure_workspace_outside_repo_returns_not_in_jj_repo_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let non_repo = dir.path();
+
+        let res = ensure_workspace(non_repo, "ws-gamma");
+        assert!(matches!(res, Err(WorkspaceError::NotInJjRepo)));
+        assert!(!non_repo.join(".workspaces").exists());
+    }
+
+    #[test]
+    fn ensure_workspace_with_empty_name_returns_invalid_workspace_name_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = dir.path();
+        init_test_repo(repo_root);
+
+        let res = ensure_workspace(repo_root, "");
+        assert!(matches!(res, Err(WorkspaceError::InvalidWorkspaceName(_))));
+    }
+
+    #[test]
+    fn ensure_workspace_with_path_traversal_name_returns_invalid_workspace_name_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = dir.path();
+        init_test_repo(repo_root);
+
+        for bad_name in [".", "..", "foo/bar", "foo\\bar", "../escape"] {
+            let res = ensure_workspace(repo_root, bad_name);
+            assert!(
+                matches!(res, Err(WorkspaceError::InvalidWorkspaceName(_))),
+                "Expected InvalidWorkspaceName for '{bad_name}'"
+            );
+        }
+    }
+}

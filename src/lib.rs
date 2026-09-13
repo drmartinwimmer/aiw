@@ -5,5 +5,5 @@
 
 pub mod config;
 pub use config::{AiwConfig, ConfigError};
-pub mod sandbox {}
-pub mod workspace {}
+pub mod workspace;
+pub use workspace::{ensure_workspace, find_jj_root, WorkspaceError};
