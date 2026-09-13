@@ -1,0 +1,8 @@
+{
+  "tools": [
+    "cargo",
+    "rustc",
+    "jj",
+    "git"
+  ]
+}
