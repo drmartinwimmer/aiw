@@ -68,78 +68,87 @@ impl AiwConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use googletest::prelude::*;
     use std::fs;
 
-    #[test]
+    #[googletest::test]
     fn test_valid_config_load_from_path() {
         let dir = tempfile::tempdir().expect("tempdir");
         let config_path = dir.path().join("aiw.json");
         fs::write(&config_path, r#"{"tools": ["claude", "gemini"]}"#).expect("write");
 
         let config = AiwConfig::load_from_path(&config_path).expect("load");
-        assert_eq!(
+        expect_that!(
             config.tools,
-            vec!["claude".to_string(), "gemini".to_string()]
+            elements_are![eq("claude"), eq("gemini")]
         );
     }
 
-    #[test]
+    #[googletest::test]
     fn test_valid_config_find_and_load() {
         let dir = tempfile::tempdir().expect("tempdir");
         let config_path = dir.path().join("aiw.json");
         fs::write(&config_path, r#"{"tools": ["tool1", "tool2"]}"#).expect("write");
 
         let config = AiwConfig::find_and_load(dir.path()).expect("find_and_load");
-        assert_eq!(config.tools, vec!["tool1".to_string(), "tool2".to_string()]);
+        expect_that!(
+            config.tools,
+            elements_are![eq("tool1"), eq("tool2")]
+        );
     }
 
-    #[test]
+    #[googletest::test]
     fn test_missing_file() {
         let dir = tempfile::tempdir().expect("tempdir");
         let non_existent = dir.path().join("aiw.json");
 
-        match AiwConfig::load_from_path(&non_existent) {
-            Err(ConfigError::NotFound(p)) => {
-                assert_eq!(p, non_existent);
-            }
-            other => assert!(matches!(other, Err(ConfigError::NotFound(_)))),
-        }
+        expect_that!(
+            AiwConfig::load_from_path(&non_existent),
+            matches_pattern!(Err(matches_pattern!(ConfigError::NotFound(eq(&non_existent)))))
+        );
 
-        match AiwConfig::find_and_load(dir.path()) {
-            Err(ConfigError::NotFound(p)) => {
-                assert_eq!(p, non_existent);
-            }
-            other => assert!(matches!(other, Err(ConfigError::NotFound(_)))),
-        }
+        expect_that!(
+            AiwConfig::find_and_load(dir.path()),
+            matches_pattern!(Err(matches_pattern!(ConfigError::NotFound(eq(&non_existent)))))
+        );
     }
 
-    #[test]
+    #[googletest::test]
     fn test_invalid_json() {
         let dir = tempfile::tempdir().expect("tempdir");
         let malformed_path = dir.path().join("aiw.json");
         fs::write(&malformed_path, r#"{"tools": ["claude""#).expect("write");
 
         let res = AiwConfig::load_from_path(&malformed_path);
-        assert!(matches!(res, Err(ConfigError::InvalidJson(_))));
+        expect_that!(
+            res,
+            matches_pattern!(Err(matches_pattern!(ConfigError::InvalidJson(anything()))))
+        );
 
         let bad_schema_path = dir.path().join("bad_schema.json");
         fs::write(&bad_schema_path, r#"{"tools": 123}"#).expect("write");
 
         let bad_schema_res = AiwConfig::load_from_path(&bad_schema_path);
-        assert!(matches!(bad_schema_res, Err(ConfigError::InvalidJson(_))));
+        expect_that!(
+            bad_schema_res,
+            matches_pattern!(Err(matches_pattern!(ConfigError::InvalidJson(anything()))))
+        );
     }
 
-    #[test]
+    #[googletest::test]
     fn test_empty_tools() {
         let dir = tempfile::tempdir().expect("tempdir");
         let config_path = dir.path().join("aiw.json");
         fs::write(&config_path, r#"{"tools": []}"#).expect("write");
 
         let res = AiwConfig::load_from_path(&config_path);
-        assert!(matches!(res, Err(ConfigError::EmptyTools)));
+        expect_that!(
+            res,
+            matches_pattern!(Err(matches_pattern!(ConfigError::EmptyTools)))
+        );
     }
 
-    #[test]
+    #[googletest::test]
     fn test_default_tools_and_network_parsing() {
         let dir = tempfile::tempdir().expect("tempdir");
         let config_path = dir.path().join("aiw.json");
@@ -150,23 +159,23 @@ mod tests {
         .expect("write");
 
         let config = AiwConfig::load_from_path(&config_path).expect("load");
-        assert!(config.default_tools);
-        assert!(config.network);
+        expect_that!(config.default_tools, is_true());
+        expect_that!(config.network, is_true());
         let eff = config.effective_tools();
-        assert!(eff.contains(&"grep".to_string()));
-        assert!(eff.contains(&"find".to_string()));
-        assert!(eff.contains(&"ls".to_string()));
+        expect_that!(eff, contains(eq("grep")));
+        expect_that!(eff, contains(eq("find")));
+        expect_that!(eff, contains(eq("ls")));
     }
 
-    #[test]
+    #[googletest::test]
     fn test_network_defaults_to_false() {
         let dir = tempfile::tempdir().expect("tempdir");
         let config_path = dir.path().join("aiw.json");
         fs::write(&config_path, r#"{"tools": ["cargo"]}"#).expect("write");
 
         let config = AiwConfig::load_from_path(&config_path).expect("load");
-        assert!(!config.network);
-        assert!(!config.default_tools);
-        assert_eq!(config.effective_tools(), vec!["cargo".to_string()]);
+        expect_that!(config.network, is_false());
+        expect_that!(config.default_tools, is_false());
+        expect_that!(config.effective_tools(), elements_are![eq("cargo")]);
     }
 }

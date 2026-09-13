@@ -284,19 +284,20 @@ impl<'a> SandboxBuilder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use googletest::prelude::*;
     use std::sync::Mutex;
 
-    static TEST_ENV_MUTEX: Mutex<()> = Mutex::new(());
+    static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
-    struct TestToolGuard {
+    struct ToolsGuard {
         _temp_dir: Option<tempfile::TempDir>,
-        orig_path: Option<String>,
+        orig_path: Option<std::ffi::OsString>,
     }
 
-    impl Drop for TestToolGuard {
+    impl Drop for ToolsGuard {
         fn drop(&mut self) {
-            if let Some(ref orig) = self.orig_path {
-                // SAFETY: Restoring PATH in drop after hermetic test execution with TEST_ENV_MUTEX held.
+            if let Some(orig) = &self.orig_path {
+                // SAFETY: Restoring PATH in drop after hermetic test execution with TEST_MUTEX held.
                 unsafe {
                     std::env::set_var("PATH", orig);
                 }
@@ -304,26 +305,32 @@ mod tests {
         }
     }
 
-    fn ensure_test_tools() -> (std::sync::MutexGuard<'static, ()>, TestToolGuard) {
-        let guard = TEST_ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
-        let needs_bwrap = which::which("bwrap").is_err();
-        let needs_agy = which::which("agy").is_err();
+    fn ensure_test_tools() -> (std::sync::MutexGuard<'static, ()>, ToolsGuard) {
+        let lock = match TEST_MUTEX.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
 
-        if !needs_bwrap && !needs_agy {
+        let has_bwrap = which::which("bwrap").is_ok();
+        let has_agy = which::which("agy").is_ok();
+
+        if has_bwrap && has_agy {
             return (
-                guard,
-                TestToolGuard {
+                lock,
+                ToolsGuard {
                     _temp_dir: None,
                     orig_path: None,
                 },
             );
         }
 
+        let orig_path = std::env::var_os("PATH");
         let temp_bin = tempfile::tempdir().expect("tempdir");
-        #[cfg(unix)]
-        use std::os::unix::fs::PermissionsExt;
 
-        if needs_bwrap {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
             let bwrap_path = temp_bin.path().join("bwrap");
             std::fs::write(&bwrap_path, "#!/bin/sh\nexit 0\n").expect("write bwrap stub");
             let mut perms = std::fs::metadata(&bwrap_path)
@@ -331,9 +338,7 @@ mod tests {
                 .permissions();
             perms.set_mode(0o755);
             std::fs::set_permissions(&bwrap_path, perms).expect("set_permissions");
-        }
 
-        if needs_agy {
             let agy_path = temp_bin.path().join("agy");
             std::fs::write(&agy_path, "#!/bin/sh\nexit 0\n").expect("write agy stub");
             let mut perms = std::fs::metadata(&agy_path)
@@ -343,20 +348,19 @@ mod tests {
             std::fs::set_permissions(&agy_path, perms).expect("set_permissions");
         }
 
-        let orig_path = std::env::var("PATH").ok();
-        let new_path = match orig_path {
-            Some(ref p) => format!("{}:{}", temp_bin.path().display(), p),
-            None => temp_bin.path().display().to_string(),
-        };
-
+        let mut new_path = temp_bin.path().as_os_str().to_os_string();
+        if let Some(ref orig) = orig_path {
+            new_path.push(":");
+            new_path.push(orig);
+        }
         // SAFETY: Mutex guard is held during test execution, preventing concurrent PATH modification.
         unsafe {
             std::env::set_var("PATH", &new_path);
         }
 
         (
-            guard,
-            TestToolGuard {
+            lock,
+            ToolsGuard {
                 _temp_dir: Some(temp_bin),
                 orig_path,
             },
@@ -371,7 +375,7 @@ mod tests {
             .any(|window| window.iter().zip(expected.iter()).all(|(a, b)| a == b))
     }
 
-    #[test]
+    #[googletest::test]
     fn resolve_tools_with_missing_tool_returns_tool_not_found() {
         let (_lock, _tools_guard) = ensure_test_tools();
 
@@ -391,12 +395,13 @@ mod tests {
 
         let builder = SandboxBuilder::new(config);
         let res = builder.build_args();
-        assert!(
-            matches!(res, Err(SandboxError::ToolNotFound(ref tool)) if tool == "non_existent_tool_xyz_98765")
+        expect_that!(
+            res,
+            matches_pattern!(Err(matches_pattern!(SandboxError::ToolNotFound(eq("non_existent_tool_xyz_98765")))))
         );
     }
 
-    #[test]
+    #[googletest::test]
     fn build_args_with_valid_tools_produces_required_flags_and_mounts() {
         let (_lock, _tools_guard) = ensure_test_tools();
 
@@ -427,8 +432,8 @@ mod tests {
         let args = builder.build_args().expect("build_args should succeed");
 
         // Bubblewrap core arguments
-        assert!(args.contains(&"--die-with-parent".to_string()));
-        assert!(args.contains(&"--share-net".to_string()));
+        expect_that!(args, contains(eq("--die-with-parent")));
+        expect_that!(args, contains(eq("--share-net")));
         assert!(contains_subslice(&args, &["--proc", "/proc"]));
         assert!(contains_subslice(&args, &["--dev", "/dev"]));
         assert!(contains_subslice(&args, &["--tmpfs", "/tmp"]));
@@ -493,7 +498,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[googletest::test]
     fn build_args_with_extra_args_passes_args_to_agy() {
         let (_lock, _tools_guard) = ensure_test_tools();
 
@@ -524,7 +529,7 @@ mod tests {
         ));
     }
 
-    #[test]
+    #[googletest::test]
     fn build_args_without_network_omits_share_net() {
         let (_lock, _tools_guard) = ensure_test_tools();
 
@@ -549,10 +554,10 @@ mod tests {
         let builder = SandboxBuilder::new(config);
         let args = builder.build_args().expect("build_args");
 
-        assert!(!args.contains(&"--share-net".to_string()));
+        expect_that!(args, not(contains(eq("--share-net"))));
     }
 
-    #[test]
+    #[googletest::test]
     fn build_args_with_missing_gemini_dir_creates_gemini_directory() {
         let (_lock, _tools_guard) = ensure_test_tools();
 
@@ -565,7 +570,7 @@ mod tests {
         let home_dir = temp_dir.path().join("home_clean");
         std::fs::create_dir_all(&home_dir).expect("create home");
         let gemini_dir = home_dir.join(".gemini");
-        assert!(!gemini_dir.exists());
+        expect_that!(gemini_dir.exists(), is_false());
 
         let tools = vec!["cargo".to_string()];
         let extra_args = vec![];
@@ -582,10 +587,10 @@ mod tests {
         let builder = SandboxBuilder::new(config);
         let _args = builder.build_args().expect("build_args");
 
-        assert!(gemini_dir.exists());
+        expect_that!(gemini_dir.exists(), is_true());
     }
 
-    #[test]
+    #[googletest::test]
     fn build_command_with_valid_config_constructs_bwrap_command() {
         let (_lock, _tools_guard) = ensure_test_tools();
 
@@ -609,10 +614,10 @@ mod tests {
 
         let builder = SandboxBuilder::new(config);
         let cmd = builder.build_command().expect("build_command");
-        assert_eq!(cmd.get_program(), "bwrap");
+        expect_that!(cmd.get_program(), eq("bwrap"));
     }
 
-    #[test]
+    #[googletest::test]
     fn build_args_with_nix_paths_binds_nix_mounts_when_present() {
         let (_lock, _tools_guard) = ensure_test_tools();
 

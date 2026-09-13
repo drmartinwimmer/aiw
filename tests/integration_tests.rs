@@ -1,3 +1,4 @@
+use googletest::prelude::*;
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -30,7 +31,7 @@ fn run_aiw(cwd: &Path, args: &[&str]) -> Output {
         .expect("execute aiw binary")
 }
 
-#[test]
+#[googletest::test]
 fn workspace_creation_and_dry_run_in_real_jj_repo_succeeds() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let repo_root = temp_dir.path();
@@ -40,58 +41,28 @@ fn workspace_creation_and_dry_run_in_real_jj_repo_succeeds() {
     std::fs::write(repo_root.join("aiw.json"), config_content).expect("write aiw.json");
 
     let output = run_aiw(repo_root, &["agy", "test-workspace", "--dry-run"]);
-    assert!(
-        output.status.success(),
-        "aiw agy --dry-run failed with stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    expect_that!(output.status.success(), is_true());
 
     let ws_path = repo_root.join(".workspaces").join("test-workspace");
-    assert!(ws_path.exists(), "Workspace directory must be created");
-    assert!(
-        ws_path.join(".jj").exists(),
-        "Workspace must contain a .jj reference"
-    );
+    expect_that!(ws_path.exists(), is_true());
+    expect_that!(ws_path.join(".jj").exists(), is_true());
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.starts_with("bwrap "),
-        "Dry-run output must start with 'bwrap '"
-    );
-    assert!(
-        stdout.contains("--bind"),
-        "Dry-run output must contain --bind"
-    );
+    expect_that!(stdout.as_ref(), starts_with("bwrap "));
+    expect_that!(stdout.as_ref(), contains_substring("--bind"));
 
     let ws_path_str = ws_path.to_string_lossy();
-    assert!(
-        stdout.contains(ws_path_str.as_ref()),
-        "Dry-run output must bind the workspace path: {}",
-        ws_path_str
-    );
+    expect_that!(stdout.as_ref(), contains_substring(ws_path_str.as_ref()));
 
     let repo_jj_str = repo_root.join(".jj").to_string_lossy().to_string();
-    assert!(
-        stdout.contains(&repo_jj_str),
-        "Dry-run output must bind repo .jj path: {}",
-        repo_jj_str
-    );
+    expect_that!(stdout.as_ref(), contains_substring(repo_jj_str.as_str()));
 
-    assert!(
-        stdout.contains(".gemini"),
-        "Dry-run output must bind ~/.gemini"
-    );
-    assert!(
-        stdout.contains("--chdir"),
-        "Dry-run output must set working directory"
-    );
-    assert!(
-        stdout.contains("agy"),
-        "Dry-run output must invoke target agy"
-    );
+    expect_that!(stdout.as_ref(), contains_substring(".gemini"));
+    expect_that!(stdout.as_ref(), contains_substring("--chdir"));
+    expect_that!(stdout.as_ref(), contains_substring("agy"));
 }
 
-#[test]
+#[googletest::test]
 fn idempotent_workspace_reuse_in_real_jj_repo_succeeds() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let repo_root = temp_dir.path();
@@ -102,31 +73,20 @@ fn idempotent_workspace_reuse_in_real_jj_repo_succeeds() {
 
     // Initial run creates workspace
     let first_output = run_aiw(repo_root, &["agy", "reused-workspace", "--dry-run"]);
-    assert!(
-        first_output.status.success(),
-        "First run failed: {}",
-        String::from_utf8_lossy(&first_output.stderr)
-    );
+    expect_that!(first_output.status.success(), is_true());
 
     let ws_path = repo_root.join(".workspaces").join("reused-workspace");
-    assert!(ws_path.exists(), "Workspace directory must exist");
-    assert!(
-        ws_path.join(".jj").exists(),
-        "Workspace must have .jj reference"
-    );
+    expect_that!(ws_path.exists(), is_true());
+    expect_that!(ws_path.join(".jj").exists(), is_true());
 
     // Second run should idempotently succeed and reuse workspace
     let second_output = run_aiw(repo_root, &["agy", "reused-workspace", "--dry-run"]);
-    assert!(
-        second_output.status.success(),
-        "Second run failed: {}",
-        String::from_utf8_lossy(&second_output.stderr)
-    );
+    expect_that!(second_output.status.success(), is_true());
 
     let stdout = String::from_utf8_lossy(&second_output.stdout);
-    assert!(
-        stdout.contains(ws_path.to_string_lossy().as_ref()),
-        "Second run must bind the existing workspace path"
+    expect_that!(
+        stdout.as_ref(),
+        contains_substring(ws_path.to_string_lossy().as_ref())
     );
 
     // Verify Jujutsu lists this workspace
@@ -135,39 +95,28 @@ fn idempotent_workspace_reuse_in_real_jj_repo_succeeds() {
         .current_dir(repo_root)
         .output()
         .expect("jj workspace list");
-    assert!(ws_list.status.success());
+    expect_that!(ws_list.status.success(), is_true());
     let list_stdout = String::from_utf8_lossy(&ws_list.stdout);
-    assert!(
-        list_stdout.contains("reused-workspace"),
-        "jj workspace list must contain reused-workspace"
-    );
+    expect_that!(list_stdout.as_ref(), contains_substring("reused-workspace"));
 }
 
-#[test]
+#[googletest::test]
 fn missing_jj_repository_fails_with_clear_error() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let non_repo = temp_dir.path();
 
     let output = run_aiw(non_repo, &["agy", "test-workspace", "--dry-run"]);
-    assert!(
-        !output.status.success(),
-        "aiw must fail outside a Jujutsu repository"
-    );
-    assert_eq!(
-        output.status.code(),
-        Some(1),
-        "aiw must exit with status 1 on repository discovery failure"
-    );
+    expect_that!(output.status.success(), is_false());
+    expect_that!(output.status.code(), eq(Some(1)));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("Error: Not inside a Jujutsu repository"),
-        "stderr must contain clear error message, got: {}",
-        stderr
+    expect_that!(
+        stderr.as_ref(),
+        contains_substring("Error: Not inside a Jujutsu repository")
     );
 }
 
-#[test]
+#[googletest::test]
 fn missing_tool_in_config_fails_with_diagnostic_error() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let repo_root = temp_dir.path();
@@ -177,27 +126,19 @@ fn missing_tool_in_config_fails_with_diagnostic_error() {
     std::fs::write(repo_root.join("aiw.json"), config_content).expect("write aiw.json");
 
     let output = run_aiw(repo_root, &["agy", "test-workspace", "--dry-run"]);
-    assert!(
-        !output.status.success(),
-        "aiw must fail when a configured tool is missing"
-    );
-    assert_eq!(
-        output.status.code(),
-        Some(1),
-        "aiw must exit with status 1 on missing tool"
-    );
+    expect_that!(output.status.success(), is_false());
+    expect_that!(output.status.code(), eq(Some(1)));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains(
+    expect_that!(
+        stderr.as_ref(),
+        contains_substring(
             "Error: Required host tool 'non_existent_tool_xyz123' could not be found in PATH"
-        ),
-        "stderr must indicate the specific missing tool, got: {}",
-        stderr
+        )
     );
 }
 
-#[test]
+#[googletest::test]
 fn invalid_config_json_fails_with_parse_error() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let repo_root = temp_dir.path();
@@ -206,21 +147,17 @@ fn invalid_config_json_fails_with_parse_error() {
     std::fs::write(repo_root.join("aiw.json"), "not valid json {").expect("write bad json");
 
     let output = run_aiw(repo_root, &["agy", "test-workspace", "--dry-run"]);
-    assert!(
-        !output.status.success(),
-        "aiw must fail when aiw.json has invalid JSON"
-    );
-    assert_eq!(output.status.code(), Some(1));
+    expect_that!(output.status.success(), is_false());
+    expect_that!(output.status.code(), eq(Some(1)));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("Error: Failed to parse JSON in configuration file"),
-        "stderr must contain JSON parsing diagnostic, got: {}",
-        stderr
+    expect_that!(
+        stderr.as_ref(),
+        contains_substring("Error: Failed to parse JSON in configuration file")
     );
 }
 
-#[test]
+#[googletest::test]
 fn live_bwrap_execution_in_temp_workspace_runs_and_verifies_containment() {
     if which::which("bwrap").is_err() || which::which("agy").is_err() {
         eprintln!("Skipping live_bwrap_execution test: bwrap or agy not found in PATH");
@@ -237,31 +174,17 @@ fn live_bwrap_execution_in_temp_workspace_runs_and_verifies_containment() {
     // Invoke live container execution forwarding `--version` to agy inside the sandbox
     let output = run_aiw(repo_root, &["agy", "live-workspace", "--", "--version"]);
 
-    assert!(
-        output.status.success(),
-        "Live container execution failed with status {:?}, stderr: {}",
-        output.status.code(),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    expect_that!(output.status.success(), is_true());
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        !stdout.trim().is_empty(),
-        "Live container execution should output agy version"
-    );
+    expect_that!(stdout.trim().is_empty(), is_false());
 
     let ws_path = repo_root.join(".workspaces").join("live-workspace");
-    assert!(
-        ws_path.exists(),
-        "Workspace directory must exist after live execution"
-    );
-    assert!(
-        ws_path.join(".jj").exists(),
-        "Workspace must contain valid .jj repository link"
-    );
+    expect_that!(ws_path.exists(), is_true());
+    expect_that!(ws_path.join(".jj").exists(), is_true());
 }
 
-#[test]
+#[googletest::test]
 fn config_with_default_tools_and_network_flag_in_real_repo() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let repo_root = temp_dir.path();
@@ -271,20 +194,13 @@ fn config_with_default_tools_and_network_flag_in_real_repo() {
     std::fs::write(repo_root.join("aiw.json"), config_content).expect("write aiw.json");
 
     let output = run_aiw(repo_root, &["agy", "default-tools-ws", "--dry-run"]);
-    assert!(
-        output.status.success(),
-        "aiw agy failed with stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    expect_that!(output.status.success(), is_true());
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("--share-net"),
-        "Dry-run output must contain --share-net when network is true"
-    );
+    expect_that!(stdout.as_ref(), contains_substring("--share-net"));
 }
 
-#[test]
+#[googletest::test]
 fn config_with_network_false_omits_share_net_in_dry_run() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let repo_root = temp_dir.path();
@@ -294,15 +210,8 @@ fn config_with_network_false_omits_share_net_in_dry_run() {
     std::fs::write(repo_root.join("aiw.json"), config_content).expect("write aiw.json");
 
     let output = run_aiw(repo_root, &["agy", "no-net-ws", "--dry-run"]);
-    assert!(
-        output.status.success(),
-        "aiw agy failed with stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    expect_that!(output.status.success(), is_true());
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        !stdout.contains("--share-net"),
-        "Dry-run output must omit --share-net when network is false"
-    );
+    expect_that!(stdout.as_ref(), not(contains_substring("--share-net")));
 }

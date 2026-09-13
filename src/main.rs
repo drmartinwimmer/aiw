@@ -115,31 +115,32 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use googletest::prelude::*;
 
-    #[test]
+    #[googletest::test]
     fn parse_agy_subcommand_minimal_succeeds() {
         let Cli {
             command: Commands::Agy(cmd),
         } = Cli::try_parse_from(["aiw", "agy", "my-workspace"]).expect("parse minimal agy");
 
-        assert_eq!(cmd.workspace_name(), "my-workspace");
-        assert!(!cmd.dry_run());
-        assert!(cmd.extra_args().is_empty());
+        expect_that!(cmd.workspace_name(), eq("my-workspace"));
+        expect_that!(cmd.dry_run(), is_false());
+        expect_that!(cmd.extra_args(), empty());
     }
 
-    #[test]
+    #[googletest::test]
     fn parse_agy_subcommand_with_dry_run_flag_succeeds() {
         let Cli {
             command: Commands::Agy(cmd),
         } = Cli::try_parse_from(["aiw", "agy", "my-workspace", "--dry-run"])
             .expect("parse agy with dry run");
 
-        assert_eq!(cmd.workspace_name(), "my-workspace");
-        assert!(cmd.dry_run());
-        assert!(cmd.extra_args().is_empty());
+        expect_that!(cmd.workspace_name(), eq("my-workspace"));
+        expect_that!(cmd.dry_run(), is_true());
+        expect_that!(cmd.extra_args(), empty());
     }
 
-    #[test]
+    #[googletest::test]
     fn parse_agy_subcommand_with_dry_run_and_extra_args_succeeds() {
         let Cli {
             command: Commands::Agy(cmd),
@@ -154,26 +155,30 @@ mod tests {
         ])
         .expect("parse agy with extra args");
 
-        assert_eq!(cmd.workspace_name(), "feature-1");
-        assert!(cmd.dry_run());
-        assert_eq!(cmd.extra_args(), &["--model", "gemini-2.5"]);
+        expect_that!(cmd.workspace_name(), eq("feature-1"));
+        expect_that!(cmd.dry_run(), is_true());
+        expect_that!(cmd.extra_args(), elements_are![eq("--model"), eq("gemini-2.5")]);
     }
 
-    #[test]
+    #[googletest::test]
     fn parse_missing_subcommand_fails_with_missing_subcommand_kind() {
         let res = Cli::try_parse_from(["aiw"]);
-        assert!(matches!(
+        expect_that!(
             res,
-            Err(ref err) if err.kind() == clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
-        ));
+            err(predicate(|err: &clap::Error| {
+                err.kind() == clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+            }))
+        );
     }
 
-    #[test]
+    #[googletest::test]
     fn parse_missing_workspace_name_fails_with_missing_required_argument_kind() {
         let res = Cli::try_parse_from(["aiw", "agy"]);
-        assert!(matches!(
+        expect_that!(
             res,
-            Err(ref err) if err.kind() == clap::error::ErrorKind::MissingRequiredArgument
-        ));
+            err(predicate(|err: &clap::Error| {
+                err.kind() == clap::error::ErrorKind::MissingRequiredArgument
+            }))
+        );
     }
 }
