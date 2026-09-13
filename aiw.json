@@ -4,5 +4,8 @@
     "rustc",
     "jj",
     "git"
-  ]
+  ],
+  "default_tools": true,
+  "network": true
 }
+

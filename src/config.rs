@@ -1,8 +1,17 @@
 use std::path::{Path, PathBuf};
 
+pub const STANDARD_DEFAULT_TOOLS: &[&str] = &[
+    "grep", "find", "ls", "cat", "cp", "mv", "rm", "mkdir", "sh", "bash", "sed", "awk",
+];
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct AiwConfig {
+    #[serde(default)]
     pub tools: Vec<String>,
+    #[serde(default)]
+    pub default_tools: bool,
+    #[serde(default)]
+    pub network: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -18,6 +27,20 @@ pub enum ConfigError {
 }
 
 impl AiwConfig {
+    /// Returns the effective list of tools, appending standard Linux tools if `default_tools` is true.
+    pub fn effective_tools(&self) -> Vec<String> {
+        let mut result = self.tools.clone();
+        if self.default_tools {
+            for tool in STANDARD_DEFAULT_TOOLS {
+                let tool_str = (*tool).to_string();
+                if !result.contains(&tool_str) {
+                    result.push(tool_str);
+                }
+            }
+        }
+        result
+    }
+
     /// Loads configuration directly from a specific file path.
     pub fn load_from_path(path: &Path) -> Result<Self, ConfigError> {
         let content = match std::fs::read_to_string(path) {
@@ -29,7 +52,7 @@ impl AiwConfig {
         };
 
         let config: Self = serde_json::from_str(&content)?;
-        if config.tools.is_empty() {
+        if config.tools.is_empty() && !config.default_tools {
             return Err(ConfigError::EmptyTools);
         }
 
@@ -114,5 +137,36 @@ mod tests {
 
         let res = AiwConfig::load_from_path(&config_path);
         assert!(matches!(res, Err(ConfigError::EmptyTools)));
+    }
+
+    #[test]
+    fn test_default_tools_and_network_parsing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config_path = dir.path().join("aiw.json");
+        fs::write(
+            &config_path,
+            r#"{"default_tools": true, "network": true}"#,
+        )
+        .expect("write");
+
+        let config = AiwConfig::load_from_path(&config_path).expect("load");
+        assert!(config.default_tools);
+        assert!(config.network);
+        let eff = config.effective_tools();
+        assert!(eff.contains(&"grep".to_string()));
+        assert!(eff.contains(&"find".to_string()));
+        assert!(eff.contains(&"ls".to_string()));
+    }
+
+    #[test]
+    fn test_network_defaults_to_false() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config_path = dir.path().join("aiw.json");
+        fs::write(&config_path, r#"{"tools": ["cargo"]}"#).expect("write");
+
+        let config = AiwConfig::load_from_path(&config_path).expect("load");
+        assert!(!config.network);
+        assert!(!config.default_tools);
+        assert_eq!(config.effective_tools(), vec!["cargo".to_string()]);
     }
 }

@@ -20,6 +20,7 @@ pub struct SandboxConfig<'a> {
     pub tools: &'a [String],
     pub extra_args: &'a [String],
     pub home_dir: Option<&'a Path>,
+    pub network: bool,
 }
 
 #[derive(Debug)]
@@ -71,8 +72,11 @@ impl<'a> SandboxBuilder<'a> {
             "/dev".to_string(),
             "--tmpfs".to_string(),
             "/tmp".to_string(),
-            "--share-net".to_string(),
         ];
+
+        if self.config.network {
+            args.push("--share-net".to_string());
+        }
 
         // System read-only mounts (mounted if present on host)
         let ro_system_paths = [
@@ -355,6 +359,7 @@ mod tests {
             tools: &missing_tools,
             extra_args: &extra_args,
             home_dir: None,
+            network: false,
         };
 
         let builder = SandboxBuilder::new(config);
@@ -388,6 +393,7 @@ mod tests {
             tools: &tools,
             extra_args: &extra_args,
             home_dir: Some(&home_dir),
+            network: true,
         };
 
         let builder = SandboxBuilder::new(config);
@@ -479,6 +485,7 @@ mod tests {
             tools: &tools,
             extra_args: &extra_args,
             home_dir: None,
+            network: false,
         };
 
         let builder = SandboxBuilder::new(config);
@@ -488,6 +495,34 @@ mod tests {
             &args,
             &["--", "agy", "--prompt", "hello world"]
         ));
+    }
+
+    #[test]
+    fn build_args_without_network_omits_share_net() {
+        let (_lock, _tools_guard) = ensure_test_tools();
+
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = temp_dir.path().join("repo");
+        std::fs::create_dir_all(repo_root.join(".jj")).expect("create .jj");
+        let workspace_path = temp_dir.path().join("workspace");
+        std::fs::create_dir_all(&workspace_path).expect("create ws");
+
+        let tools = vec!["cargo".to_string()];
+        let extra_args = vec![];
+
+        let config = SandboxConfig {
+            repo_root: &repo_root,
+            workspace_path: &workspace_path,
+            tools: &tools,
+            extra_args: &extra_args,
+            home_dir: None,
+            network: false,
+        };
+
+        let builder = SandboxBuilder::new(config);
+        let args = builder.build_args().expect("build_args");
+
+        assert!(!args.contains(&"--share-net".to_string()));
     }
 
     #[test]
@@ -514,6 +549,7 @@ mod tests {
             tools: &tools,
             extra_args: &extra_args,
             home_dir: Some(&home_dir),
+            network: false,
         };
 
         let builder = SandboxBuilder::new(config);
@@ -541,6 +577,7 @@ mod tests {
             tools: &tools,
             extra_args: &extra_args,
             home_dir: None,
+            network: false,
         };
 
         let builder = SandboxBuilder::new(config);
@@ -567,6 +604,7 @@ mod tests {
             tools: &tools,
             extra_args: &extra_args,
             home_dir: None,
+            network: false,
         };
 
         let builder = SandboxBuilder::new(config);

@@ -49,13 +49,15 @@ fn run() -> Result<ExitCode, AppError> {
             let repo_root = aiw::workspace::find_jj_root(&current_dir)?;
             let workspace_path = aiw::workspace::ensure_workspace(&repo_root, &workspace_name)?;
             let config = aiw::config::AiwConfig::find_and_load(&repo_root)?;
+            let effective_tools = config.effective_tools();
 
             let sandbox_config = aiw::sandbox::SandboxConfig {
                 repo_root: &repo_root,
                 workspace_path: &workspace_path,
-                tools: &config.tools,
+                tools: &effective_tools,
                 extra_args: &extra_args,
                 home_dir: None,
+                network: config.network,
             };
 
             let builder = aiw::sandbox::SandboxBuilder::new(sandbox_config);

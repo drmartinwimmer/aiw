@@ -279,3 +279,53 @@ fn live_bwrap_execution_in_temp_workspace_runs_and_verifies_containment()
 
     Ok(())
 }
+
+#[test]
+fn config_with_default_tools_and_network_flag_in_real_repo() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let repo_root = temp_dir.path();
+    init_test_jj_repo(repo_root)?;
+
+    let config_content = r#"{"default_tools": true, "network": true}"#;
+    std::fs::write(repo_root.join("aiw.json"), config_content)?;
+
+    let output = run_aiw(repo_root, &["agy", "default-tools-ws", "--dry-run"])?;
+    assert!(
+        output.status.success(),
+        "aiw agy failed with stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--share-net"),
+        "Dry-run output must contain --share-net when network is true"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn config_with_network_false_omits_share_net_in_dry_run() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let repo_root = temp_dir.path();
+    init_test_jj_repo(repo_root)?;
+
+    let config_content = r#"{"tools": ["cargo"], "network": false}"#;
+    std::fs::write(repo_root.join("aiw.json"), config_content)?;
+
+    let output = run_aiw(repo_root, &["agy", "no-net-ws", "--dry-run"])?;
+    assert!(
+        output.status.success(),
+        "aiw agy failed with stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("--share-net"),
+        "Dry-run output must omit --share-net when network is false"
+    );
+
+    Ok(())
+}
