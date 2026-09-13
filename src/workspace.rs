@@ -14,28 +14,31 @@ pub enum WorkspaceError {
 
 /// Finds the root directory of the enclosing Jujutsu repository by invoking `jj --no-pager root`.
 pub fn find_jj_root(start_dir: &Path) -> Result<PathBuf, WorkspaceError> {
+    let dir = normalize_search_dir(start_dir)?;
+    if !dir.exists() {
+        return Err(WorkspaceError::NotInJjRepo);
+    }
+    execute_jj_root(&dir)
+}
+
+fn normalize_search_dir(start_dir: &Path) -> Result<PathBuf, std::io::Error> {
     let abs_dir = if start_dir.is_absolute() {
         start_dir.to_path_buf()
     } else {
         std::env::current_dir()?.join(start_dir)
     };
 
-    let dir = if abs_dir.is_file() {
-        match abs_dir.parent() {
-            Some(parent) => parent.to_path_buf(),
-            None => abs_dir,
-        }
+    Ok(if abs_dir.is_file() {
+        abs_dir.parent().map(Path::to_path_buf).unwrap_or(abs_dir)
     } else {
         abs_dir
-    };
+    })
+}
 
-    if !dir.exists() {
-        return Err(WorkspaceError::NotInJjRepo);
-    }
-
+fn execute_jj_root(dir: &Path) -> Result<PathBuf, WorkspaceError> {
     let output = match std::process::Command::new("jj")
         .args(["--no-pager", "root"])
-        .current_dir(&dir)
+        .current_dir(dir)
         .output()
     {
         Ok(out) => out,
@@ -62,10 +65,7 @@ pub fn find_jj_root(start_dir: &Path) -> Result<PathBuf, WorkspaceError> {
     Ok(PathBuf::from(trimmed))
 }
 
-/// Ensures a workspace named `workspace_name` exists under `<repo_root>/.workspaces/<workspace-name>`.
-/// If it already exists, returns its absolute path.
-/// If not, invokes `jj --no-pager workspace add .workspaces/<workspace-name> --name <workspace-name>`.
-pub fn ensure_workspace(repo_root: &Path, workspace_name: &str) -> Result<PathBuf, WorkspaceError> {
+fn validate_workspace_name(workspace_name: &str) -> Result<(), WorkspaceError> {
     if workspace_name.is_empty()
         || workspace_name == "."
         || workspace_name == ".."
@@ -76,6 +76,14 @@ pub fn ensure_workspace(repo_root: &Path, workspace_name: &str) -> Result<PathBu
             workspace_name.to_string(),
         ));
     }
+    Ok(())
+}
+
+/// Ensures a workspace named `workspace_name` exists under `<repo_root>/.workspaces/<workspace-name>`.
+/// If it already exists, returns its absolute path.
+/// If not, invokes `jj --no-pager workspace add .workspaces/<workspace-name> --name <workspace-name>`.
+pub fn ensure_workspace(repo_root: &Path, workspace_name: &str) -> Result<PathBuf, WorkspaceError> {
+    validate_workspace_name(workspace_name)?;
 
     let abs_repo_root = if repo_root.is_absolute() {
         repo_root.to_path_buf()
@@ -88,7 +96,6 @@ pub fn ensure_workspace(repo_root: &Path, workspace_name: &str) -> Result<PathBu
     }
 
     let workspace_path = abs_repo_root.join(".workspaces").join(workspace_name);
-
     if workspace_path.join(".jj").exists() {
         return Ok(workspace_path);
     }
@@ -97,11 +104,21 @@ pub fn ensure_workspace(repo_root: &Path, workspace_name: &str) -> Result<PathBu
     std::fs::create_dir_all(&workspaces_dir)?;
 
     let rel_workspace_path = Path::new(".workspaces").join(workspace_name);
+    execute_jj_workspace_add(&abs_repo_root, &rel_workspace_path, workspace_name)?;
+
+    Ok(workspace_path)
+}
+
+fn execute_jj_workspace_add(
+    repo_root: &Path,
+    rel_workspace_path: &Path,
+    workspace_name: &str,
+) -> Result<(), WorkspaceError> {
     let output = match std::process::Command::new("jj")
         .args(["--no-pager", "workspace", "add"])
-        .arg(&rel_workspace_path)
+        .arg(rel_workspace_path)
         .args(["--name", workspace_name])
-        .current_dir(&abs_repo_root)
+        .current_dir(repo_root)
         .output()
     {
         Ok(out) => out,
@@ -117,7 +134,7 @@ pub fn ensure_workspace(repo_root: &Path, workspace_name: &str) -> Result<PathBu
         return Err(WorkspaceError::JjCommandFailed(stderr.trim().to_string()));
     }
 
-    Ok(workspace_path)
+    Ok(())
 }
 
 #[cfg(test)]

@@ -53,6 +53,24 @@ impl<'a> SandboxBuilder<'a> {
         }
 
         // 2. Resolve agy and all configured tools
+        let tool_dirs = self.resolve_all_tool_dirs()?;
+        let home_path = self.resolve_home_dir();
+
+        // 3. Assemble Bubblewrap CLI arguments
+        let mut args = Vec::new();
+        self.append_base_namespaces(&mut args);
+        Self::append_ro_system_mounts(&mut args);
+        Self::append_nix_socket_mount(&mut args);
+        Self::append_tool_mounts(&mut args, &tool_dirs);
+        self.append_writable_mounts(&mut args, home_path.as_deref());
+        Self::append_runtime_auth_mounts(&mut args);
+        Self::append_env_vars(&mut args, &tool_dirs, home_path.as_deref());
+        self.append_workspace_and_command(&mut args);
+
+        Ok(args)
+    }
+
+    fn resolve_all_tool_dirs(&self) -> Result<Vec<PathBuf>, SandboxError> {
         let mut tool_dirs: Vec<PathBuf> = Vec::new();
         for tool in std::iter::once("agy").chain(self.config.tools.iter().map(String::as_str)) {
             if let Some(dir) = resolve_tool_dir(tool)?
@@ -61,10 +79,18 @@ impl<'a> SandboxBuilder<'a> {
                 tool_dirs.push(dir);
             }
         }
+        Ok(tool_dirs)
+    }
 
-        // 3. Assemble Bubblewrap CLI arguments
-        // Core namespace isolation and process management flags
-        let mut args: Vec<String> = vec![
+    fn resolve_home_dir(&self) -> Option<PathBuf> {
+        self.config
+            .home_dir
+            .map(Path::to_path_buf)
+            .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+    }
+
+    fn append_base_namespaces(&self, args: &mut Vec<String>) {
+        args.extend([
             "--die-with-parent".to_string(),
             "--proc".to_string(),
             "/proc".to_string(),
@@ -72,13 +98,14 @@ impl<'a> SandboxBuilder<'a> {
             "/dev".to_string(),
             "--tmpfs".to_string(),
             "/tmp".to_string(),
-        ];
+        ]);
 
         if self.config.network {
             args.push("--share-net".to_string());
         }
+    }
 
-        // System read-only mounts (mounted if present on host)
+    fn append_ro_system_mounts(args: &mut Vec<String>) {
         let ro_system_paths = [
             "/nix",
             "/bin",
@@ -101,24 +128,26 @@ impl<'a> SandboxBuilder<'a> {
         for path_str in &ro_system_paths {
             if Path::new(path_str).exists() {
                 args.push("--ro-bind".to_string());
-                args.push(path_str.to_string());
-                args.push(path_str.to_string());
+                args.push((*path_str).to_string());
+                args.push((*path_str).to_string());
             }
         }
+    }
 
-        // Nix daemon socket (read-write if present)
+    fn append_nix_socket_mount(args: &mut Vec<String>) {
         let nix_socket = Path::new("/nix/var/nix/daemon-socket");
         if nix_socket.exists() {
             args.push("--bind".to_string());
             args.push("/nix/var/nix/daemon-socket".to_string());
             args.push("/nix/var/nix/daemon-socket".to_string());
         }
+    }
 
-        // Any resolved tool directories not covered by /nix or /usr
+    fn append_tool_mounts(args: &mut Vec<String>, tool_dirs: &[PathBuf]) {
         let nix_mounted = Path::new("/nix").exists();
         let usr_mounted = Path::new("/usr").exists();
 
-        for dir in &tool_dirs {
+        for dir in tool_dirs {
             let covered_by_nix = nix_mounted && dir.starts_with("/nix");
             let covered_by_usr = usr_mounted && dir.starts_with("/usr");
             if !covered_by_nix && !covered_by_usr {
@@ -128,8 +157,9 @@ impl<'a> SandboxBuilder<'a> {
                 args.push(dir_str);
             }
         }
+    }
 
-        // Writable mounts
+    fn append_writable_mounts(&self, args: &mut Vec<String>, home_path: Option<&Path>) {
         let ws_str = self.config.workspace_path.display().to_string();
         args.push("--bind".to_string());
         args.push(ws_str.clone());
@@ -141,14 +171,7 @@ impl<'a> SandboxBuilder<'a> {
         args.push(repo_jj_str.clone());
         args.push(repo_jj_str);
 
-        // Home directory resolution and ~/.gemini mount
-        let home_path: Option<PathBuf> = self
-            .config
-            .home_dir
-            .map(Path::to_path_buf)
-            .or_else(|| std::env::var_os("HOME").map(PathBuf::from));
-
-        if let Some(ref home) = home_path {
+        if let Some(home) = home_path {
             let gemini_dir = home.join(".gemini");
             if !gemini_dir.exists() {
                 match std::fs::create_dir_all(&gemini_dir) {
@@ -170,8 +193,9 @@ impl<'a> SandboxBuilder<'a> {
                 args.push(keyrings_str);
             }
         }
+    }
 
-        // DBus / Secret Service keyring support for OAuth tokens
+    fn append_runtime_auth_mounts(args: &mut Vec<String>) {
         if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
             let runtime_path = PathBuf::from(&runtime_dir);
             if runtime_path.exists() {
@@ -180,9 +204,14 @@ impl<'a> SandboxBuilder<'a> {
                 args.push(runtime_dir);
             }
         }
+    }
 
-        // Environment variables
-        let mut path_entries = tool_dirs;
+    fn append_env_vars(
+        args: &mut Vec<String>,
+        tool_dirs: &[PathBuf],
+        home_path: Option<&Path>,
+    ) {
+        let mut path_entries = tool_dirs.to_vec();
         for std_dir in [PathBuf::from("/usr/bin"), PathBuf::from("/bin")] {
             if !path_entries.contains(&std_dir) {
                 path_entries.push(std_dir);
@@ -198,7 +227,7 @@ impl<'a> SandboxBuilder<'a> {
         args.push("PATH".to_string());
         args.push(path_val);
 
-        if let Some(ref home) = home_path {
+        if let Some(home) = home_path {
             args.push("--setenv".to_string());
             args.push("HOME".to_string());
             args.push(home.display().to_string());
@@ -220,19 +249,17 @@ impl<'a> SandboxBuilder<'a> {
                 args.push(val);
             }
         }
+    }
 
-        // Working directory
+    fn append_workspace_and_command(&self, args: &mut Vec<String>) {
         args.push("--chdir".to_string());
         args.push(self.config.workspace_path.display().to_string());
 
-        // Target command and extra arguments
         args.push("--".to_string());
         args.push("agy".to_string());
         for extra in self.config.extra_args {
             args.push(extra.clone());
         }
-
-        Ok(args)
     }
 
     /// Builds the std::process::Command prepared to execute bwrap with proper env and args.
