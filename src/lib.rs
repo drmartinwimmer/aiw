@@ -7,3 +7,5 @@ pub mod config;
 pub use config::{AiwConfig, ConfigError};
 pub mod workspace;
 pub use workspace::{ensure_workspace, find_jj_root, WorkspaceError};
+pub mod sandbox;
+pub use sandbox::{SandboxBuilder, SandboxConfig, SandboxError};
