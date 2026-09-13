@@ -26,6 +26,26 @@
           cargo = toolchain;
           rustc = toolchain;
         };
+        aiwPackage = rustPlatform.buildRustPackage {
+          pname = "aiw";
+          version = "0.1.0";
+          src = ./.;
+          cargoLock.lockFile = ./Cargo.lock;
+          nativeCheckInputs = [
+            pkgs.jujutsu
+            pkgs.bubblewrap
+          ];
+          preCheck = ''
+            export HOME=$(mktemp -d)
+            mkdir -p $HOME/bin
+            cat << 'EOF' > $HOME/bin/agy
+            #!/bin/sh
+            echo "agy 1.1.24"
+            EOF
+            chmod +x $HOME/bin/agy
+            export PATH="$HOME/bin:$PATH"
+          '';
+        };
       in
       {
         # Development shell
@@ -38,13 +58,19 @@
             ];
           };
 
-        # Optional: Uncomment if configuring a single-crate build package
-        # packages.default = rustPlatform.buildRustPackage {
-        #   pname = "your-package-name";
-        #   version = "0.1.0";
-        #   src = ./.;
-        #   cargoLock.lockFile = ./Cargo.lock;
-        # };
+        packages = {
+          default = aiwPackage;
+          aiw = aiwPackage;
+        };
+
+        apps = {
+          default = flake-utils.lib.mkApp {
+            drv = aiwPackage;
+          };
+          aiw = flake-utils.lib.mkApp {
+            drv = aiwPackage;
+          };
+        };
       }
     );
 }

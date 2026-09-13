@@ -145,12 +145,14 @@ impl<'a> SandboxBuilder<'a> {
         if let Some(ref home) = home_path {
             let gemini_dir = home.join(".gemini");
             if !gemini_dir.exists() {
-                std::fs::create_dir_all(&gemini_dir)?;
+                let _ = std::fs::create_dir_all(&gemini_dir);
             }
-            let gemini_str = gemini_dir.display().to_string();
-            args.push("--bind".to_string());
-            args.push(gemini_str.clone());
-            args.push(gemini_str);
+            if gemini_dir.exists() {
+                let gemini_str = gemini_dir.display().to_string();
+                args.push("--bind".to_string());
+                args.push(gemini_str.clone());
+                args.push(gemini_str);
+            }
         }
 
         // Environment variables
@@ -248,7 +250,7 @@ mod tests {
     }
 
     fn ensure_test_tools() -> (std::sync::MutexGuard<'static, ()>, TestToolGuard) {
-        let guard = TEST_ENV_MUTEX.lock().expect("lock test env");
+        let guard = TEST_ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let needs_bwrap = which::which("bwrap").is_err();
         let needs_agy = which::which("agy").is_err();
 
