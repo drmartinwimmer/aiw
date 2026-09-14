@@ -173,11 +173,6 @@ impl<'a> SandboxBuilder<'a> {
 
         if let Some(home) = home_path {
             let gemini_dir = home.join(".gemini");
-            if !gemini_dir.exists() {
-                match std::fs::create_dir_all(&gemini_dir) {
-                    Ok(()) | Err(_) => {}
-                }
-            }
             if gemini_dir.exists() {
                 let gemini_str = gemini_dir.display().to_string();
                 args.push("--bind".to_string());
@@ -285,100 +280,24 @@ impl<'a> SandboxBuilder<'a> {
 mod tests {
     use super::*;
     use googletest::prelude::*;
-    use std::sync::Mutex;
 
-    static TEST_MUTEX: Mutex<()> = Mutex::new(());
-
-    struct ToolsGuard {
-        _temp_dir: Option<tempfile::TempDir>,
-        orig_path: Option<std::ffi::OsString>,
-    }
-
-    impl Drop for ToolsGuard {
-        fn drop(&mut self) {
-            if let Some(orig) = &self.orig_path {
-                // SAFETY: Restoring PATH in drop after hermetic test execution with TEST_MUTEX held.
-                unsafe {
-                    std::env::set_var("PATH", orig);
-                }
+    fn contains_subslice<'a, 'b>(expected: &'a [&'a str]) -> impl Matcher<&'b [String]> + 'a {
+        predicate(move |actual: &[String]| {
+            if expected.is_empty() {
+                return true;
             }
-        }
-    }
-
-    fn ensure_test_tools() -> (std::sync::MutexGuard<'static, ()>, ToolsGuard) {
-        let lock = match TEST_MUTEX.lock() {
-            Ok(g) => g,
-            Err(p) => p.into_inner(),
-        };
-
-        let has_bwrap = which::which("bwrap").is_ok();
-        let has_agy = which::which("agy").is_ok();
-
-        if has_bwrap && has_agy {
-            return (
-                lock,
-                ToolsGuard {
-                    _temp_dir: None,
-                    orig_path: None,
-                },
-            );
-        }
-
-        let orig_path = std::env::var_os("PATH");
-        let temp_bin = tempfile::tempdir().expect("tempdir");
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-
-            let bwrap_path = temp_bin.path().join("bwrap");
-            std::fs::write(&bwrap_path, "#!/bin/sh\nexit 0\n").expect("write bwrap stub");
-            let mut perms = std::fs::metadata(&bwrap_path)
-                .expect("metadata")
-                .permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&bwrap_path, perms).expect("set_permissions");
-
-            let agy_path = temp_bin.path().join("agy");
-            std::fs::write(&agy_path, "#!/bin/sh\nexit 0\n").expect("write agy stub");
-            let mut perms = std::fs::metadata(&agy_path)
-                .expect("metadata")
-                .permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&agy_path, perms).expect("set_permissions");
-        }
-
-        let mut new_path = temp_bin.path().as_os_str().to_os_string();
-        if let Some(ref orig) = orig_path {
-            new_path.push(":");
-            new_path.push(orig);
-        }
-        // SAFETY: Mutex guard is held during test execution, preventing concurrent PATH modification.
-        unsafe {
-            std::env::set_var("PATH", &new_path);
-        }
-
-        (
-            lock,
-            ToolsGuard {
-                _temp_dir: Some(temp_bin),
-                orig_path,
-            },
+            actual.windows(expected.len()).any(|window| {
+                window.iter().zip(expected.iter()).all(|(a, b)| a == b)
+            })
+        })
+        .with_description(
+            format!("contains contiguous subslice {expected:?}"),
+            format!("does not contain contiguous subslice {expected:?}"),
         )
-    }
-
-    fn contains_subslice(args: &[String], expected: &[&str]) -> bool {
-        if expected.is_empty() {
-            return true;
-        }
-        args.windows(expected.len())
-            .any(|window| window.iter().zip(expected.iter()).all(|(a, b)| a == b))
     }
 
     #[googletest::test]
     fn resolve_tools_with_missing_tool_returns_tool_not_found() {
-        let (_lock, _tools_guard) = ensure_test_tools();
-
         let dummy_repo = Path::new("/dummy/repo");
         let dummy_ws = Path::new("/dummy/ws");
         let missing_tools = vec!["non_existent_tool_xyz_98765".to_string()];
@@ -403,8 +322,6 @@ mod tests {
 
     #[googletest::test]
     fn build_args_with_valid_tools_produces_required_flags_and_mounts() {
-        let (_lock, _tools_guard) = ensure_test_tools();
-
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let repo_root = temp_dir.path().join("repo");
         let repo_jj = repo_root.join(".jj");
@@ -415,6 +332,8 @@ mod tests {
 
         let home_dir = temp_dir.path().join("home");
         std::fs::create_dir_all(&home_dir).expect("create home");
+        let gemini_dir = home_dir.join(".gemini");
+        std::fs::create_dir_all(&gemini_dir).expect("create gemini dir");
 
         let tools = vec!["cargo".to_string()];
         let extra_args = vec![];
@@ -434,31 +353,31 @@ mod tests {
         // Bubblewrap core arguments
         expect_that!(args, contains(eq("--die-with-parent")));
         expect_that!(args, contains(eq("--share-net")));
-        assert!(contains_subslice(&args, &["--proc", "/proc"]));
-        assert!(contains_subslice(&args, &["--dev", "/dev"]));
-        assert!(contains_subslice(&args, &["--tmpfs", "/tmp"]));
+        expect_that!(args.as_slice(), contains_subslice(&["--proc", "/proc"]));
+        expect_that!(args.as_slice(), contains_subslice(&["--dev", "/dev"]));
+        expect_that!(args.as_slice(), contains_subslice(&["--tmpfs", "/tmp"]));
 
         // Writable mounts
         let ws_str = workspace_path.display().to_string();
-        assert!(contains_subslice(&args, &["--bind", &ws_str, &ws_str]));
+        expect_that!(args.as_slice(), contains_subslice(&["--bind", &ws_str, &ws_str]));
 
         let jj_str = repo_jj.display().to_string();
-        assert!(contains_subslice(&args, &["--bind", &jj_str, &jj_str]));
+        expect_that!(args.as_slice(), contains_subslice(&["--bind", &jj_str, &jj_str]));
 
-        let gemini_str = home_dir.join(".gemini").display().to_string();
-        assert!(contains_subslice(
-            &args,
-            &["--bind", &gemini_str, &gemini_str]
-        ));
+        let gemini_str = gemini_dir.display().to_string();
+        expect_that!(
+            args.as_slice(),
+            contains_subslice(&["--bind", &gemini_str, &gemini_str])
+        );
 
         // Working directory
-        assert!(contains_subslice(&args, &["--chdir", &ws_str]));
+        expect_that!(args.as_slice(), contains_subslice(&["--chdir", &ws_str]));
 
         // Command
-        assert!(contains_subslice(&args, &["--", "agy"]));
+        expect_that!(args.as_slice(), contains_subslice(&["--", "agy"]));
 
         // Environment variables
-        assert!(contains_subslice(&args, &["--setenv", "PATH"]));
+        expect_that!(args.as_slice(), contains_subslice(&["--setenv", "PATH"]));
         let path_entry = args
             .windows(3)
             .find(|w| {
@@ -466,42 +385,48 @@ mod tests {
                     && w.get(1).map(|s| s.as_str()) == Some("PATH")
             })
             .and_then(|w| w.get(2));
-        assert!(path_entry.is_some());
-        if let Some(path_val) = path_entry {
-            let cargo_path = which::which("cargo").expect("cargo in path");
-            let cargo_canonical = std::fs::canonicalize(&cargo_path).expect("canonicalize cargo");
-            let cargo_dir = cargo_canonical
-                .parent()
-                .expect("cargo parent")
-                .display()
-                .to_string();
-            assert!(path_val.split(':').any(|dir| dir == cargo_dir));
-        }
+        let cargo_path = which::which("cargo").expect("cargo in path");
+        let cargo_canonical = std::fs::canonicalize(&cargo_path).expect("canonicalize cargo");
+        let cargo_dir = cargo_canonical
+            .parent()
+            .expect("cargo parent")
+            .display()
+            .to_string();
+        expect_that!(
+            path_entry,
+            some(predicate(|path_val: &String| {
+                path_val.split(':').any(|dir| dir == cargo_dir)
+            }))
+        );
 
         let home_str = home_dir.display().to_string();
-        assert!(contains_subslice(&args, &["--setenv", "HOME", &home_str]));
+        expect_that!(
+            args.as_slice(),
+            contains_subslice(&["--setenv", "HOME", &home_str])
+        );
 
         if let Ok(nix_path) = std::env::var("NIX_PATH") {
-            assert!(contains_subslice(
-                &args,
-                &["--setenv", "NIX_PATH", &nix_path]
-            ));
+            expect_that!(
+                args.as_slice(),
+                contains_subslice(&["--setenv", "NIX_PATH", &nix_path])
+            );
         }
         if let Ok(term) = std::env::var("TERM") {
-            assert!(contains_subslice(&args, &["--setenv", "TERM", &term]));
+            expect_that!(
+                args.as_slice(),
+                contains_subslice(&["--setenv", "TERM", &term])
+            );
         }
         if let Ok(colorterm) = std::env::var("COLORTERM") {
-            assert!(contains_subslice(
-                &args,
-                &["--setenv", "COLORTERM", &colorterm]
-            ));
+            expect_that!(
+                args.as_slice(),
+                contains_subslice(&["--setenv", "COLORTERM", &colorterm])
+            );
         }
     }
 
     #[googletest::test]
     fn build_args_with_extra_args_passes_args_to_agy() {
-        let (_lock, _tools_guard) = ensure_test_tools();
-
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let repo_root = temp_dir.path().join("repo");
         std::fs::create_dir_all(repo_root.join(".jj")).expect("create .jj");
@@ -523,16 +448,14 @@ mod tests {
         let builder = SandboxBuilder::new(config);
         let args = builder.build_args().expect("build_args");
 
-        assert!(contains_subslice(
-            &args,
-            &["--", "agy", "--prompt", "hello world"]
-        ));
+        expect_that!(
+            args.as_slice(),
+            contains_subslice(&["--", "agy", "--prompt", "hello world"])
+        );
     }
 
     #[googletest::test]
     fn build_args_without_network_omits_share_net() {
-        let (_lock, _tools_guard) = ensure_test_tools();
-
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let repo_root = temp_dir.path().join("repo");
         std::fs::create_dir_all(repo_root.join(".jj")).expect("create .jj");
@@ -558,9 +481,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn build_args_with_missing_gemini_dir_creates_gemini_directory() {
-        let (_lock, _tools_guard) = ensure_test_tools();
-
+    fn build_args_with_missing_gemini_dir_does_not_create_gemini_directory() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let repo_root = temp_dir.path().join("repo");
         std::fs::create_dir_all(repo_root.join(".jj")).expect("create .jj");
@@ -585,15 +506,15 @@ mod tests {
         };
 
         let builder = SandboxBuilder::new(config);
-        let _args = builder.build_args().expect("build_args");
+        let args = builder.build_args().expect("build_args");
 
-        expect_that!(gemini_dir.exists(), is_true());
+        expect_that!(gemini_dir.exists(), is_false());
+        let gemini_str = gemini_dir.display().to_string();
+        expect_that!(args, not(contains(eq(&gemini_str))));
     }
 
     #[googletest::test]
     fn build_command_with_valid_config_constructs_bwrap_command() {
-        let (_lock, _tools_guard) = ensure_test_tools();
-
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let repo_root = temp_dir.path().join("repo");
         std::fs::create_dir_all(repo_root.join(".jj")).expect("create .jj");
@@ -619,8 +540,6 @@ mod tests {
 
     #[googletest::test]
     fn build_args_with_nix_paths_binds_nix_mounts_when_present() {
-        let (_lock, _tools_guard) = ensure_test_tools();
-
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let repo_root = temp_dir.path().join("repo");
         std::fs::create_dir_all(repo_root.join(".jj")).expect("create .jj");
@@ -643,26 +562,32 @@ mod tests {
         let args = builder.build_args().expect("build_args");
 
         if Path::new("/nix").exists() {
-            assert!(contains_subslice(&args, &["--ro-bind", "/nix", "/nix"]));
+            expect_that!(
+                args.as_slice(),
+                contains_subslice(&["--ro-bind", "/nix", "/nix"])
+            );
         }
         if Path::new("/bin").exists() {
-            assert!(contains_subslice(&args, &["--ro-bind", "/bin", "/bin"]));
+            expect_that!(
+                args.as_slice(),
+                contains_subslice(&["--ro-bind", "/bin", "/bin"])
+            );
         }
         if Path::new("/run/systemd/resolve").exists() {
-            assert!(contains_subslice(
-                &args,
-                &["--ro-bind", "/run/systemd/resolve", "/run/systemd/resolve"]
-            ));
+            expect_that!(
+                args.as_slice(),
+                contains_subslice(&["--ro-bind", "/run/systemd/resolve", "/run/systemd/resolve"])
+            );
         }
         if Path::new("/nix/var/nix/daemon-socket").exists() {
-            assert!(contains_subslice(
-                &args,
-                &[
+            expect_that!(
+                args.as_slice(),
+                contains_subslice(&[
                     "--bind",
                     "/nix/var/nix/daemon-socket",
                     "/nix/var/nix/daemon-socket"
-                ]
-            ));
+                ])
+            );
         }
     }
 }
