@@ -72,7 +72,7 @@ mod tests {
     use std::fs;
 
     #[googletest::test]
-    fn test_valid_config_load_from_path() {
+    fn load_from_path_with_valid_config_returns_tools_list() {
         let dir = tempfile::tempdir().expect("tempdir");
         let config_path = dir.path().join("aiw.json");
         fs::write(&config_path, r#"{"tools": ["claude", "gemini"]}"#).expect("write");
@@ -85,7 +85,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_valid_config_find_and_load() {
+    fn find_and_load_with_repo_root_discovers_config() {
         let dir = tempfile::tempdir().expect("tempdir");
         let config_path = dir.path().join("aiw.json");
         fs::write(&config_path, r#"{"tools": ["tool1", "tool2"]}"#).expect("write");
@@ -98,7 +98,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_missing_file() {
+    fn load_from_path_with_missing_file_returns_not_found() {
         let dir = tempfile::tempdir().expect("tempdir");
         let non_existent = dir.path().join("aiw.json");
 
@@ -114,7 +114,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_invalid_json() {
+    fn load_from_path_with_invalid_json_returns_invalid_json_error() {
         let dir = tempfile::tempdir().expect("tempdir");
         let malformed_path = dir.path().join("aiw.json");
         fs::write(&malformed_path, r#"{"tools": ["claude""#).expect("write");
@@ -136,7 +136,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_empty_tools() {
+    fn load_from_path_with_empty_tools_and_no_defaults_returns_empty_tools_error() {
         let dir = tempfile::tempdir().expect("tempdir");
         let config_path = dir.path().join("aiw.json");
         fs::write(&config_path, r#"{"tools": []}"#).expect("write");
@@ -149,7 +149,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_default_tools_and_network_parsing() {
+    fn load_from_path_with_default_tools_and_network_parses_options() {
         let dir = tempfile::tempdir().expect("tempdir");
         let config_path = dir.path().join("aiw.json");
         fs::write(
@@ -168,7 +168,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_network_defaults_to_false() {
+    fn load_from_path_defaults_network_and_default_tools_to_false() {
         let dir = tempfile::tempdir().expect("tempdir");
         let config_path = dir.path().join("aiw.json");
         fs::write(&config_path, r#"{"tools": ["cargo"]}"#).expect("write");
