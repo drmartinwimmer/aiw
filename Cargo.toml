@@ -4,15 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.6", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
-which = "7.0"
+which = "8.0"
 
 [dev-dependencies]
-googletest = "0.13"
-tempfile = "3.17"
+googletest = "0.14"
+tempfile = "3.27"
 
 [lints]
 workspace = true

@@ -125,7 +125,7 @@ mod tests {
 
         expect_that!(cmd.workspace_name(), eq("my-workspace"));
         expect_that!(cmd.dry_run(), is_false());
-        expect_that!(cmd.extra_args(), empty());
+        expect_that!(cmd.extra_args(), is_empty());
     }
 
     #[googletest::test]
@@ -137,7 +137,7 @@ mod tests {
 
         expect_that!(cmd.workspace_name(), eq("my-workspace"));
         expect_that!(cmd.dry_run(), is_true());
-        expect_that!(cmd.extra_args(), empty());
+        expect_that!(cmd.extra_args(), is_empty());
     }
 
     #[googletest::test]

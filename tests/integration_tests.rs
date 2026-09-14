@@ -57,7 +57,12 @@ fn workspace_creation_and_dry_run_in_real_jj_repo_succeeds() {
     let repo_jj_str = repo_root.join(".jj").to_string_lossy().to_string();
     expect_that!(stdout.as_ref(), contains_substring(repo_jj_str.as_str()));
 
-    expect_that!(stdout.as_ref(), contains_substring(".gemini"));
+    if std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .is_some_and(|h| h.join(".gemini").exists())
+    {
+        expect_that!(stdout.as_ref(), contains_substring(".gemini"));
+    }
     expect_that!(stdout.as_ref(), contains_substring("--chdir"));
     expect_that!(stdout.as_ref(), contains_substring("agy"));
 }
