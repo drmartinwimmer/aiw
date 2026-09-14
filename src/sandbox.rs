@@ -79,6 +79,15 @@ impl<'a> SandboxBuilder<'a> {
                 tool_dirs.push(dir);
             }
         }
+        if let Ok(jj_bin) = which::which("jj")
+            && let Ok(canon) = std::fs::canonicalize(&jj_bin)
+            && let Some(parent) = canon.parent()
+        {
+            let parent_buf = parent.to_path_buf();
+            if !tool_dirs.contains(&parent_buf) {
+                tool_dirs.push(parent_buf);
+            }
+        }
         Ok(tool_dirs)
     }
 
@@ -171,6 +180,31 @@ impl<'a> SandboxBuilder<'a> {
         args.push(repo_jj_str.clone());
         args.push(repo_jj_str);
 
+        let repo_git = self.config.repo_root.join(".git");
+        if repo_git.exists() {
+            let repo_git_str = repo_git.display().to_string();
+            args.push("--bind".to_string());
+            args.push(repo_git_str.clone());
+            args.push(repo_git_str);
+        }
+
+        // In case git_target in .jj/repo/store points to an external git directory
+        let git_target_file = repo_jj.join("repo/store/git_target");
+        if let Ok(target_str) = std::fs::read_to_string(&git_target_file) {
+            let target_str = target_str.trim();
+            let target_path = repo_jj.join("repo/store").join(target_str);
+            if let Ok(canonical_git) = std::fs::canonicalize(&target_path)
+                && canonical_git.exists()
+            {
+                let canon_str = canonical_git.display().to_string();
+                if !args.contains(&canon_str) {
+                    args.push("--bind".to_string());
+                    args.push(canon_str.clone());
+                    args.push(canon_str);
+                }
+            }
+        }
+
         if let Some(home) = home_path {
             let gemini_dir = home.join(".gemini");
             if gemini_dir.exists() {
@@ -186,6 +220,22 @@ impl<'a> SandboxBuilder<'a> {
                 args.push("--bind".to_string());
                 args.push(keyrings_str.clone());
                 args.push(keyrings_str);
+            }
+
+            let jj_config = home.join(".config/jj");
+            if jj_config.exists() {
+                let jj_config_str = jj_config.display().to_string();
+                args.push("--ro-bind".to_string());
+                args.push(jj_config_str.clone());
+                args.push(jj_config_str);
+            }
+
+            let gitconfig = home.join(".gitconfig");
+            if gitconfig.exists() {
+                let gitconfig_str = gitconfig.display().to_string();
+                args.push("--ro-bind".to_string());
+                args.push(gitconfig_str.clone());
+                args.push(gitconfig_str);
             }
         }
     }
@@ -252,6 +302,14 @@ impl<'a> SandboxBuilder<'a> {
 
         args.push("--".to_string());
         args.push("agy".to_string());
+        if !self
+            .config
+            .extra_args
+            .iter()
+            .any(|a| a == "--dangerously-skip-permissions")
+        {
+            args.push("--dangerously-skip-permissions".to_string());
+        }
         for extra in self.config.extra_args {
             args.push(extra.clone());
         }
@@ -373,8 +431,11 @@ mod tests {
         // Working directory
         expect_that!(args.as_slice(), contains_subslice(&["--chdir", &ws_str]));
 
-        // Command
-        expect_that!(args.as_slice(), contains_subslice(&["--", "agy"]));
+        // Command (yolo mode enabled by default)
+        expect_that!(
+            args.as_slice(),
+            contains_subslice(&["--", "agy", "--dangerously-skip-permissions"])
+        );
 
         // Environment variables
         expect_that!(args.as_slice(), contains_subslice(&["--setenv", "PATH"]));
@@ -450,7 +511,13 @@ mod tests {
 
         expect_that!(
             args.as_slice(),
-            contains_subslice(&["--", "agy", "--prompt", "hello world"])
+            contains_subslice(&[
+                "--",
+                "agy",
+                "--dangerously-skip-permissions",
+                "--prompt",
+                "hello world"
+            ])
         );
     }
 
@@ -589,5 +656,47 @@ mod tests {
                 ])
             );
         }
+    }
+
+    #[googletest::test]
+    fn build_args_binds_repo_git_and_jj_config_when_present() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = temp_dir.path().join("repo");
+        std::fs::create_dir_all(repo_root.join(".jj")).expect("create .jj");
+        let repo_git = repo_root.join(".git");
+        std::fs::create_dir_all(&repo_git).expect("create .git");
+        let workspace_path = temp_dir.path().join("workspace");
+        std::fs::create_dir_all(&workspace_path).expect("create ws");
+
+        let home_dir = temp_dir.path().join("home");
+        let jj_config = home_dir.join(".config/jj");
+        std::fs::create_dir_all(&jj_config).expect("create .config/jj");
+
+        let tools = vec!["cargo".to_string()];
+        let extra_args = vec![];
+
+        let config = SandboxConfig {
+            repo_root: &repo_root,
+            workspace_path: &workspace_path,
+            tools: &tools,
+            extra_args: &extra_args,
+            home_dir: Some(&home_dir),
+            network: false,
+        };
+
+        let builder = SandboxBuilder::new(config);
+        let args = builder.build_args().expect("build_args");
+
+        let git_str = repo_git.display().to_string();
+        expect_that!(
+            args.as_slice(),
+            contains_subslice(&["--bind", &git_str, &git_str])
+        );
+
+        let jj_config_str = jj_config.display().to_string();
+        expect_that!(
+            args.as_slice(),
+            contains_subslice(&["--ro-bind", &jj_config_str, &jj_config_str])
+        );
     }
 }

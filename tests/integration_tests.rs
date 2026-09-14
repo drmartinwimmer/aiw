@@ -57,6 +57,9 @@ fn workspace_creation_and_dry_run_in_real_jj_repo_succeeds() {
     let repo_jj_str = repo_root.join(".jj").to_string_lossy().to_string();
     expect_that!(stdout.as_ref(), contains_substring(repo_jj_str.as_str()));
 
+    let repo_git_str = repo_root.join(".git").to_string_lossy().to_string();
+    expect_that!(stdout.as_ref(), contains_substring(repo_git_str.as_str()));
+
     if std::env::var_os("HOME")
         .map(std::path::PathBuf::from)
         .is_some_and(|h| h.join(".gemini").exists())
@@ -65,6 +68,10 @@ fn workspace_creation_and_dry_run_in_real_jj_repo_succeeds() {
     }
     expect_that!(stdout.as_ref(), contains_substring("--chdir"));
     expect_that!(stdout.as_ref(), contains_substring("agy"));
+    expect_that!(
+        stdout.as_ref(),
+        contains_substring("--dangerously-skip-permissions")
+    );
 }
 
 #[googletest::test]
@@ -220,3 +227,87 @@ fn config_with_network_false_omits_share_net_in_dry_run() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     expect_that!(stdout.as_ref(), not(contains_substring("--share-net")));
 }
+
+#[googletest::test]
+fn jj_commands_in_sandbox_execute_successfully_and_persist_commits() {
+    if which::which("bwrap").is_err() || which::which("jj").is_err() {
+        eprintln!("Skipping jj_commands_in_sandbox test: bwrap or jj not found in PATH");
+        return;
+    }
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let repo_root = temp_dir.path();
+    init_test_jj_repo(repo_root);
+
+    let config_content = r#"{"tools": ["jj"]}"#;
+    std::fs::write(repo_root.join("aiw.json"), config_content).expect("write aiw.json");
+
+    let ws_path = aiw::workspace::ensure_workspace(repo_root, "jj-sandbox-test")
+        .expect("ensure_workspace");
+
+    let tools = vec!["jj".to_string()];
+    let config = aiw::sandbox::SandboxConfig {
+        repo_root,
+        workspace_path: &ws_path,
+        tools: &tools,
+        extra_args: &[],
+        home_dir: None,
+        network: false,
+    };
+    let builder = aiw::sandbox::SandboxBuilder::new(config);
+    let mut bwrap_args = builder.build_args().expect("build_args");
+
+    // Verify .git is mounted
+    let repo_git_str = repo_root.join(".git").display().to_string();
+    expect_that!(bwrap_args, contains(eq(&repo_git_str)));
+
+    // Replace trailing agy invocation with jj --no-pager status
+    let dash_pos = bwrap_args.iter().position(|a| a == "--").expect("contains --");
+    bwrap_args.truncate(dash_pos);
+    bwrap_args.extend(["--".into(), "jj".into(), "--no-pager".into(), "status".into()]);
+
+    let status_output = Command::new("bwrap")
+        .args(&bwrap_args)
+        .output()
+        .expect("execute bwrap jj status");
+
+    expect_that!(status_output.status.success(), is_true());
+    let status_stdout = String::from_utf8_lossy(&status_output.stdout);
+    expect_that!(
+        status_stdout.as_ref(),
+        contains_substring("The working copy has no changes")
+    );
+
+    // Test mutating jj command inside sandbox: jj --no-pager new -m "sandbox-commit"
+    bwrap_args.truncate(dash_pos);
+    bwrap_args.extend([
+        "--".into(),
+        "jj".into(),
+        "--no-pager".into(),
+        "new".into(),
+        "-m".into(),
+        "commit from inside sandbox".into(),
+    ]);
+
+    let new_output = Command::new("bwrap")
+        .args(&bwrap_args)
+        .output()
+        .expect("execute bwrap jj new");
+
+    expect_that!(new_output.status.success(), is_true());
+
+    // Verify change is recorded and visible to host jj
+    let log_output = Command::new("jj")
+        .args(["--no-pager", "log", "-r", "@", "--ignore-working-copy"])
+        .current_dir(&ws_path)
+        .output()
+        .expect("host jj log");
+
+    expect_that!(log_output.status.success(), is_true());
+    let log_stdout = String::from_utf8_lossy(&log_output.stdout);
+    expect_that!(
+        log_stdout.as_ref(),
+        contains_substring("commit from inside sandbox")
+    );
+}
+
