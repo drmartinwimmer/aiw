@@ -64,13 +64,18 @@ impl AgyCommand {
             let _ = aiw::config::AiwConfig::find_and_load(&repo_root)?;
         }
 
+        let use_direnv = which::which("direnv").is_ok();
+        if use_direnv {
+            aiw::sandbox::allow_direnv_if_present(&workspace_path);
+        }
+
         let sandbox_config = aiw::sandbox::SandboxConfig {
             repo_root: &repo_root,
             workspace_path: &workspace_path,
             command: None,
             extra_args: &self.extra_args,
             settings_path: None,
-            use_direnv: which::which("direnv").is_ok(),
+            use_direnv,
         };
 
         let builder = aiw::sandbox::SandboxBuilder::new(sandbox_config);

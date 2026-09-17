@@ -96,6 +96,10 @@ impl<'a> SandboxBuilder<'a> {
 
     /// Builds the std::process::Command prepared to execute fence.
     pub fn build_command(&self) -> Result<Command, SandboxError> {
+        if self.config.use_direnv {
+            allow_direnv_if_present(self.config.workspace_path);
+        }
+
         let args = self.build_args()?;
         let mut cmd = Command::new("fence");
         cmd.current_dir(self.config.workspace_path);
@@ -152,6 +156,22 @@ fn ensure_user_profile_bin_paths(cmd: &mut Command) {
         && let Ok(new_path) = std::env::join_paths(paths)
     {
         cmd.env("PATH", new_path);
+    }
+}
+
+/// If direnv is present on PATH and the workspace directory contains `.envrc` or `.env`,
+/// runs `direnv allow` on that directory so direnv does not block execution.
+pub fn allow_direnv_if_present(workspace_path: &Path) {
+    if which::which("direnv").is_err() {
+        return;
+    }
+    if workspace_path.join(".envrc").exists() || workspace_path.join(".env").exists() {
+        let mut cmd = Command::new("direnv");
+        cmd.args(["allow"]).arg(workspace_path);
+        ensure_user_profile_bin_paths(&mut cmd);
+        match cmd.output() {
+            Ok(_) | Err(_) => {}
+        }
     }
 }
 

@@ -336,15 +336,7 @@ fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
     )
     .expect("write .envrc");
 
-    // Allow direnv for this directory
-    let allow_output = Command::new("direnv")
-        .args(["allow"])
-        .current_dir(&ws_path)
-        .output()
-        .expect("direnv allow");
-    assert!(allow_output.status.success(), "direnv allow failed");
-
-    // Execute command in sandbox using SandboxBuilder
+    // Execute command in sandbox using SandboxBuilder (which automatically runs allow_direnv_if_present)
     let sh_bin = if Path::new("/bin/sh").exists() {
         "/bin/sh"
     } else {
