@@ -1,6 +1,8 @@
 {
   "tools": [
     "cargo",
+    "bwrap",
+    "fence",
     "rustc",
     "jj",
     "git"
@@ -8,4 +10,3 @@
   "default_tools": true,
   "network": true
 }
-
