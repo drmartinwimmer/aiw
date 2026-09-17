@@ -137,6 +137,49 @@ fn execute_jj_workspace_add(
     Ok(())
 }
 
+/// Forgets a workspace named `workspace_name` in Jujutsu by invoking
+/// `jj --no-pager workspace forget <workspace-name>`.
+pub fn forget_workspace(repo_root: &Path, workspace_name: &str) -> Result<(), WorkspaceError> {
+    validate_workspace_name(workspace_name)?;
+
+    let abs_repo_root = if repo_root.is_absolute() {
+        repo_root.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(repo_root)
+    };
+
+    if !abs_repo_root.join(".jj").exists() {
+        return Err(WorkspaceError::NotInJjRepo);
+    }
+
+    execute_jj_workspace_forget(&abs_repo_root, workspace_name)
+}
+
+fn execute_jj_workspace_forget(
+    repo_root: &Path,
+    workspace_name: &str,
+) -> Result<(), WorkspaceError> {
+    let output = match std::process::Command::new("jj")
+        .args(["--no-pager", "workspace", "forget", workspace_name])
+        .current_dir(repo_root)
+        .output()
+    {
+        Ok(out) => out,
+        Err(err) => return Err(WorkspaceError::Io(err)),
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr_lower = stderr.to_lowercase();
+        if stderr_lower.contains("no jj repo") || stderr_lower.contains("there is no jj repo") {
+            return Err(WorkspaceError::NotInJjRepo);
+        }
+        return Err(WorkspaceError::JjCommandFailed(stderr.trim().to_string()));
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,6 +314,78 @@ mod tests {
 
         for bad_name in [".", "..", "foo/bar", "foo\\bar", "../escape"] {
             let res = ensure_workspace(repo_root, bad_name);
+            expect_that!(
+                res,
+                matches_pattern!(Err(matches_pattern!(WorkspaceError::InvalidWorkspaceName(anything()))))
+            );
+        }
+    }
+
+    #[googletest::test]
+    fn forget_workspace_removes_workspace_from_jj() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = dir.path();
+        init_test_repo(repo_root);
+
+        let ws_name = "ws-to-forget";
+        let _ = ensure_workspace(repo_root, ws_name).expect("ensure_workspace");
+
+        let before = std::process::Command::new("jj")
+            .args(["--no-pager", "workspace", "list"])
+            .current_dir(repo_root)
+            .output()
+            .expect("jj workspace list");
+        expect_that!(
+            String::from_utf8_lossy(&before.stdout).as_ref(),
+            contains_substring(ws_name)
+        );
+
+        forget_workspace(repo_root, ws_name).expect("forget_workspace");
+
+        let after = std::process::Command::new("jj")
+            .args(["--no-pager", "workspace", "list"])
+            .current_dir(repo_root)
+            .output()
+            .expect("jj workspace list");
+        expect_that!(
+            String::from_utf8_lossy(&after.stdout).as_ref(),
+            not(contains_substring(ws_name))
+        );
+    }
+
+    #[googletest::test]
+    fn forget_workspace_outside_repo_returns_not_in_jj_repo_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let non_repo = dir.path();
+
+        let res = forget_workspace(non_repo, "ws-forget");
+        expect_that!(
+            res,
+            matches_pattern!(Err(matches_pattern!(WorkspaceError::NotInJjRepo)))
+        );
+    }
+
+    #[googletest::test]
+    fn forget_workspace_with_empty_name_returns_invalid_workspace_name_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = dir.path();
+        init_test_repo(repo_root);
+
+        let res = forget_workspace(repo_root, "");
+        expect_that!(
+            res,
+            matches_pattern!(Err(matches_pattern!(WorkspaceError::InvalidWorkspaceName(anything()))))
+        );
+    }
+
+    #[googletest::test]
+    fn forget_workspace_with_path_traversal_name_returns_invalid_workspace_name_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = dir.path();
+        init_test_repo(repo_root);
+
+        for bad_name in [".", "..", "foo/bar", "foo\\bar", "../escape"] {
+            let res = forget_workspace(repo_root, bad_name);
             expect_that!(
                 res,
                 matches_pattern!(Err(matches_pattern!(WorkspaceError::InvalidWorkspaceName(anything()))))

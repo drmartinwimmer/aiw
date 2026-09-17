@@ -12,13 +12,31 @@ struct Cli {
 enum Commands {
     /// Launch agy in an isolated Fence sandbox for a Jujutsu workspace
     Agy(AgyCommand),
+    /// Forget a Jujutsu workspace
+    Forget(ForgetCommand),
 }
 
 impl Commands {
     fn run(&self) -> Result<ExitCode, AppError> {
         match self {
             Commands::Agy(cmd) => cmd.run(),
+            Commands::Forget(cmd) => cmd.run(),
         }
+    }
+}
+
+#[derive(clap::Args, Debug, PartialEq, Eq)]
+struct ForgetCommand {
+    /// Workspace name under .workspaces/<workspace-name>
+    workspace_name: String,
+}
+
+impl ForgetCommand {
+    fn run(&self) -> Result<ExitCode, AppError> {
+        let current_dir = std::env::current_dir()?;
+        let repo_root = aiw::workspace::find_jj_root(&current_dir)?;
+        aiw::workspace::forget_workspace(&repo_root, &self.workspace_name)?;
+        Ok(ExitCode::SUCCESS)
     }
 }
 
@@ -49,8 +67,10 @@ impl AgyCommand {
         let sandbox_config = aiw::sandbox::SandboxConfig {
             repo_root: &repo_root,
             workspace_path: &workspace_path,
+            command: None,
             extra_args: &self.extra_args,
             settings_path: None,
+            use_direnv: aiw::sandbox::find_direnv().is_some(),
         };
 
         let builder = aiw::sandbox::SandboxBuilder::new(sandbox_config);
@@ -119,32 +139,32 @@ mod tests {
 
     #[googletest::test]
     fn parse_agy_subcommand_minimal_succeeds() {
-        let Cli {
-            command: Commands::Agy(cmd),
-        } = Cli::try_parse_from(["aiw", "agy", "my-workspace"]).expect("parse minimal agy");
-
-        expect_that!(cmd.workspace_name(), eq("my-workspace"));
-        expect_that!(cmd.dry_run(), is_false());
-        expect_that!(cmd.extra_args(), is_empty());
+        let cli = Cli::try_parse_from(["aiw", "agy", "my-workspace"]).expect("parse minimal agy");
+        if let Commands::Agy(cmd) = cli.command {
+            expect_that!(cmd.workspace_name(), eq("my-workspace"));
+            expect_that!(cmd.dry_run(), is_false());
+            expect_that!(cmd.extra_args(), is_empty());
+        } else {
+            expect_that!(false, is_true());
+        }
     }
 
     #[googletest::test]
     fn parse_agy_subcommand_with_dry_run_flag_succeeds() {
-        let Cli {
-            command: Commands::Agy(cmd),
-        } = Cli::try_parse_from(["aiw", "agy", "my-workspace", "--dry-run"])
+        let cli = Cli::try_parse_from(["aiw", "agy", "my-workspace", "--dry-run"])
             .expect("parse agy with dry run");
-
-        expect_that!(cmd.workspace_name(), eq("my-workspace"));
-        expect_that!(cmd.dry_run(), is_true());
-        expect_that!(cmd.extra_args(), is_empty());
+        if let Commands::Agy(cmd) = cli.command {
+            expect_that!(cmd.workspace_name(), eq("my-workspace"));
+            expect_that!(cmd.dry_run(), is_true());
+            expect_that!(cmd.extra_args(), is_empty());
+        } else {
+            expect_that!(false, is_true());
+        }
     }
 
     #[googletest::test]
     fn parse_agy_subcommand_with_dry_run_and_extra_args_succeeds() {
-        let Cli {
-            command: Commands::Agy(cmd),
-        } = Cli::try_parse_from([
+        let cli = Cli::try_parse_from([
             "aiw",
             "agy",
             "feature-1",
@@ -154,10 +174,13 @@ mod tests {
             "gemini-2.5",
         ])
         .expect("parse agy with extra args");
-
-        expect_that!(cmd.workspace_name(), eq("feature-1"));
-        expect_that!(cmd.dry_run(), is_true());
-        expect_that!(cmd.extra_args(), elements_are![eq("--model"), eq("gemini-2.5")]);
+        if let Commands::Agy(cmd) = cli.command {
+            expect_that!(cmd.workspace_name(), eq("feature-1"));
+            expect_that!(cmd.dry_run(), is_true());
+            expect_that!(cmd.extra_args(), elements_are![eq("--model"), eq("gemini-2.5")]);
+        } else {
+            expect_that!(false, is_true());
+        }
     }
 
     #[googletest::test]
@@ -174,6 +197,27 @@ mod tests {
     #[googletest::test]
     fn parse_missing_workspace_name_fails_with_missing_required_argument_kind() {
         let res = Cli::try_parse_from(["aiw", "agy"]);
+        expect_that!(
+            res,
+            err(predicate(|err: &clap::Error| {
+                err.kind() == clap::error::ErrorKind::MissingRequiredArgument
+            }))
+        );
+    }
+
+    #[googletest::test]
+    fn parse_forget_subcommand_succeeds() {
+        let cli = Cli::try_parse_from(["aiw", "forget", "old-ws"]).expect("parse forget");
+        if let Commands::Forget(cmd) = cli.command {
+            expect_that!(cmd.workspace_name.as_str(), eq("old-ws"));
+        } else {
+            expect_that!(false, is_true());
+        }
+    }
+
+    #[googletest::test]
+    fn parse_forget_missing_workspace_name_fails() {
+        let res = Cli::try_parse_from(["aiw", "forget"]);
         expect_that!(
             res,
             err(predicate(|err: &clap::Error| {

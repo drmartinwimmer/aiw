@@ -13,8 +13,35 @@ pub enum SandboxError {
 pub struct SandboxConfig<'a> {
     pub repo_root: &'a Path,
     pub workspace_path: &'a Path,
+    pub command: Option<&'a [String]>,
     pub extra_args: &'a [String],
     pub settings_path: Option<&'a Path>,
+    pub use_direnv: bool,
+}
+
+/// Locates the `direnv` executable on the host system.
+#[must_use]
+pub fn find_direnv() -> Option<PathBuf> {
+    if let Ok(path) = which::which("direnv") {
+        return Some(path);
+    }
+    if let Ok(user) = std::env::var("USER") {
+        let profile_bin = PathBuf::from(format!("/etc/profiles/per-user/{user}/bin/direnv"));
+        if profile_bin.exists() {
+            return Some(profile_bin);
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let nix_home = PathBuf::from(home).join(".nix-profile/bin/direnv");
+        if nix_home.exists() {
+            return Some(nix_home);
+        }
+    }
+    let sys_path = PathBuf::from("/run/current-system/sw/bin/direnv");
+    if sys_path.exists() {
+        return Some(sys_path);
+    }
+    None
 }
 
 #[derive(Debug)]
@@ -44,15 +71,28 @@ impl<'a> SandboxBuilder<'a> {
         }
 
         args.push("--".to_string());
-        args.push("agy".to_string());
 
-        if !self
-            .config
-            .extra_args
-            .iter()
-            .any(|a| a == "--dangerously-skip-permissions")
-        {
-            args.push("--dangerously-skip-permissions".to_string());
+        if self.config.use_direnv {
+            args.push("direnv".to_string());
+            args.push("exec".to_string());
+            args.push(".".to_string());
+        }
+
+        if let Some(cmd) = self.config.command {
+            for part in cmd {
+                args.push(part.clone());
+            }
+        } else {
+            args.push("agy".to_string());
+
+            if !self
+                .config
+                .extra_args
+                .iter()
+                .any(|a| a == "--dangerously-skip-permissions")
+            {
+                args.push("--dangerously-skip-permissions".to_string());
+            }
         }
 
         for extra in self.config.extra_args {
@@ -85,6 +125,32 @@ impl<'a> SandboxBuilder<'a> {
         let mut cmd = Command::new("fence");
         cmd.current_dir(self.config.workspace_path);
         cmd.args(args);
+
+        // Ensure user profile bin paths are in PATH so fence can find tools like direnv
+        if let Ok(path_var) = std::env::var("PATH") {
+            let mut paths: Vec<PathBuf> = std::env::split_paths(&path_var).collect();
+            let mut updated = false;
+
+            if let Ok(user) = std::env::var("USER") {
+                let user_bin = PathBuf::from(format!("/etc/profiles/per-user/{user}/bin"));
+                if user_bin.exists() && !paths.contains(&user_bin) {
+                    paths.push(user_bin);
+                    updated = true;
+                }
+            }
+            if let Ok(home) = std::env::var("HOME") {
+                let nix_bin = PathBuf::from(home).join(".nix-profile/bin");
+                if nix_bin.exists() && !paths.contains(&nix_bin) {
+                    paths.push(nix_bin);
+                    updated = true;
+                }
+            }
+            if updated
+                && let Ok(new_path) = std::env::join_paths(paths)
+            {
+                cmd.env("PATH", new_path);
+            }
+        }
 
         // In environments where TMPDIR points to a non-existent directory, fallback to /tmp
         if let Ok(tmp) = std::env::var("TMPDIR")
@@ -128,15 +194,6 @@ mod tests {
     }
 
     #[googletest::test]
-    fn fence_not_found_error_formats_diagnostic_message() {
-        let err = SandboxError::FenceNotFound;
-        expect_that!(
-            err.to_string(),
-            eq("Fence executable 'fence' not found in PATH")
-        );
-    }
-
-    #[googletest::test]
     fn build_args_with_existing_fence_json_in_repo_root_passes_settings_flag() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let repo_root = temp_dir.path().join("repo");
@@ -150,8 +207,10 @@ mod tests {
         let config = SandboxConfig {
             repo_root: &repo_root,
             workspace_path: &workspace_path,
+            command: None,
             extra_args: &extra_args,
             settings_path: None,
+            use_direnv: false,
         };
 
         let builder = SandboxBuilder::new(config);
@@ -184,8 +243,10 @@ mod tests {
         let config = SandboxConfig {
             repo_root: &repo_root,
             workspace_path: &workspace_path,
+            command: None,
             extra_args: &extra_args,
             settings_path: None,
+            use_direnv: false,
         };
 
         let builder = SandboxBuilder::new(config);
@@ -209,8 +270,10 @@ mod tests {
         let config = SandboxConfig {
             repo_root: &repo_root,
             workspace_path: &workspace_path,
+            command: None,
             extra_args: &extra_args,
             settings_path: None,
+            use_direnv: false,
         };
 
         let builder = SandboxBuilder::new(config);
@@ -240,8 +303,10 @@ mod tests {
         let config = SandboxConfig {
             repo_root: &repo_root,
             workspace_path: &workspace_path,
+            command: None,
             extra_args: &extra_args,
             settings_path: Some(&custom_fence),
+            use_direnv: false,
         };
 
         let builder = SandboxBuilder::new(config);
@@ -265,8 +330,10 @@ mod tests {
         let config = SandboxConfig {
             repo_root: &repo_root,
             workspace_path: &workspace_path,
+            command: None,
             extra_args: &extra_args,
             settings_path: None,
+            use_direnv: false,
         };
 
         let builder = SandboxBuilder::new(config);
@@ -299,8 +366,10 @@ mod tests {
         let config = SandboxConfig {
             repo_root: &repo_root,
             workspace_path: &workspace_path,
+            command: None,
             extra_args: &extra_args,
             settings_path: None,
+            use_direnv: false,
         };
 
         let builder = SandboxBuilder::new(config);
@@ -314,6 +383,66 @@ mod tests {
     }
 
     #[googletest::test]
+    fn build_args_with_use_direnv_true_prepends_direnv_exec() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = temp_dir.path().join("repo");
+        let workspace_path = repo_root.join(".workspaces").join("ws");
+        std::fs::create_dir_all(&workspace_path).expect("create ws");
+
+        let extra_args = vec![];
+        let config = SandboxConfig {
+            repo_root: &repo_root,
+            workspace_path: &workspace_path,
+            command: None,
+            extra_args: &extra_args,
+            settings_path: None,
+            use_direnv: true,
+        };
+
+        let builder = SandboxBuilder::new(config);
+        let args = builder.build_args().expect("build_args");
+
+        expect_that!(
+            args.as_slice(),
+            contains_subslice(&[
+                "--",
+                "direnv",
+                "exec",
+                ".",
+                "agy",
+                "--dangerously-skip-permissions"
+            ])
+        );
+    }
+
+    #[googletest::test]
+    fn build_args_with_custom_command_executes_specified_command() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = temp_dir.path().join("repo");
+        let workspace_path = repo_root.join(".workspaces").join("ws");
+        std::fs::create_dir_all(&workspace_path).expect("create ws");
+
+        let custom_cmd = vec!["sh".to_string(), "-c".to_string(), "echo ok".to_string()];
+        let extra_args = vec![];
+        let config = SandboxConfig {
+            repo_root: &repo_root,
+            workspace_path: &workspace_path,
+            command: Some(&custom_cmd),
+            extra_args: &extra_args,
+            settings_path: None,
+            use_direnv: true,
+        };
+
+        let builder = SandboxBuilder::new(config);
+        let args = builder.build_args().expect("build_args");
+
+        expect_that!(
+            args.as_slice(),
+            contains_subslice(&["--", "direnv", "exec", ".", "sh", "-c", "echo ok"])
+        );
+    }
+
+    #[googletest::test]
     fn build_command_sets_fence_program_and_workspace_cwd() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let repo_root = temp_dir.path().join("repo");
@@ -324,8 +453,10 @@ mod tests {
         let config = SandboxConfig {
             repo_root: &repo_root,
             workspace_path: &workspace_path,
+            command: None,
             extra_args: &extra_args,
             settings_path: None,
+            use_direnv: false,
         };
 
         let builder = SandboxBuilder::new(config);

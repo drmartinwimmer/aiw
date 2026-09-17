@@ -26,9 +26,30 @@ fn init_test_jj_repo(path: &Path) {
 fn write_test_fence_json(repo_root: &Path) {
     let content = r#"{
   "extends": "code",
+  "network": {
+    "allowLocalOutbound": false,
+    "allowedDomains": [
+      "*.googleapis.com",
+      "*.google.com",
+      "*.googleusercontent.com",
+      "*.gstatic.com",
+      "daily-cloudcode-pa.googleapis.com",
+      "cloudcode-pa.googleapis.com"
+    ]
+  },
   "filesystem": {
     "allowRead": ["/nix"],
-    "allowWrite": [".", ".jj/**", ".git/**", "../../.jj/**", "../../.git/**", ".workspaces/**"]
+    "allowWrite": [
+      ".",
+      ".jj/**",
+      ".git/**",
+      "../../.jj/**",
+      "../../.git/**",
+      ".workspaces/**",
+      "~/.gemini/**",
+      "~/.local/share/**",
+      "~/.local/share/keyrings/**"
+    ]
   },
   "command": {
     "acceptSharedBinaryCannotRuntimeDeny": ["chroot"]
@@ -183,8 +204,10 @@ fn jj_commands_in_fence_sandbox_execute_successfully_and_persist_commits() {
     let config = aiw::sandbox::SandboxConfig {
         repo_root,
         workspace_path: &ws_path,
+        command: None,
         extra_args: &[],
         settings_path: None,
+        use_direnv: false,
     };
     let builder = aiw::sandbox::SandboxBuilder::new(config);
     let mut fence_args = builder.build_args().expect("build_args");
@@ -246,5 +269,123 @@ fn jj_commands_in_fence_sandbox_execute_successfully_and_persist_commits() {
     expect_that!(
         log_stdout.as_ref(),
         contains_substring("commit from inside fence")
+    );
+}
+
+#[googletest::test]
+fn forget_subcommand_removes_workspace_from_jj_list() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let repo_root = temp_dir.path();
+    init_test_jj_repo(repo_root);
+    write_test_fence_json(repo_root);
+
+    // Create workspace with aiw agy --dry-run
+    let create_output = run_aiw(repo_root, &["agy", "ws-to-forget", "--dry-run"]);
+    expect_that!(create_output.status.success(), is_true());
+
+    let ws_path = repo_root.join(".workspaces").join("ws-to-forget");
+    expect_that!(ws_path.exists(), is_true());
+
+    // Verify jj lists the workspace
+    let list_before = Command::new("jj")
+        .args(["--no-pager", "workspace", "list"])
+        .current_dir(repo_root)
+        .output()
+        .expect("jj workspace list");
+    expect_that!(
+        String::from_utf8_lossy(&list_before.stdout).as_ref(),
+        contains_substring("ws-to-forget")
+    );
+
+    // Run aiw forget ws-to-forget
+    let forget_output = run_aiw(repo_root, &["forget", "ws-to-forget"]);
+    expect_that!(forget_output.status.success(), is_true());
+
+    // Verify jj no longer lists the workspace
+    let list_after = Command::new("jj")
+        .args(["--no-pager", "workspace", "list"])
+        .current_dir(repo_root)
+        .output()
+        .expect("jj workspace list");
+    expect_that!(
+        String::from_utf8_lossy(&list_after.stdout).as_ref(),
+        not(contains_substring("ws-to-forget"))
+    );
+}
+
+#[googletest::test]
+fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
+    if which::which("fence").is_err() || aiw::sandbox::find_direnv().is_none() {
+        eprintln!("Skipping sandbox_command_runs_in_correct_working_directory_and_loads_direnv: fence or direnv not found");
+        return;
+    }
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let repo_root = temp_dir.path();
+    init_test_jj_repo(repo_root);
+    write_test_fence_json(repo_root);
+
+    let ws_path = aiw::workspace::ensure_workspace(repo_root, "direnv-ws")
+        .expect("ensure_workspace");
+
+    // Write a .envrc inside the workspace setting an environment variable
+    let envrc_path = ws_path.join(".envrc");
+    std::fs::write(
+        &envrc_path,
+        "export PATH=\"/bin:/usr/bin:$PATH\"\nexport AIW_DIRENV_LOADED=sandbox_direnv_ok\n",
+    )
+    .expect("write .envrc");
+
+    // Allow direnv for this directory
+    let direnv_bin = aiw::sandbox::find_direnv().expect("direnv bin");
+    let allow_output = Command::new(&direnv_bin)
+        .args(["allow"])
+        .current_dir(&ws_path)
+        .output()
+        .expect("direnv allow");
+    assert!(allow_output.status.success(), "direnv allow failed");
+
+    // Execute command in sandbox using SandboxBuilder
+    let sh_bin = if Path::new("/bin/sh").exists() {
+        "/bin/sh"
+    } else {
+        "sh"
+    };
+    let test_cmd = vec![
+        sh_bin.to_string(),
+        "-c".to_string(),
+        "echo CWD=$PWD; echo VAL=$AIW_DIRENV_LOADED".to_string(),
+    ];
+    let config = aiw::sandbox::SandboxConfig {
+        repo_root,
+        workspace_path: &ws_path,
+        command: Some(&test_cmd),
+        extra_args: &[],
+        settings_path: None,
+        use_direnv: true,
+    };
+
+    let builder = aiw::sandbox::SandboxBuilder::new(config);
+    let mut cmd = builder.build_command().expect("build_command");
+    let output = cmd.output().expect("execute sandbox command");
+
+    assert!(
+        output.status.success(),
+        "sandbox command execution failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let canonical_ws = ws_path.canonicalize().unwrap_or_else(|_| ws_path.clone());
+    let canonical_ws_str = canonical_ws.display().to_string();
+    let ws_str = ws_path.display().to_string();
+
+    expect_that!(
+        stdout.as_ref(),
+        predicate(|s: &str| s.contains(&format!("CWD={canonical_ws_str}")) || s.contains(&format!("CWD={ws_str}")))
+    );
+    expect_that!(
+        stdout.as_ref(),
+        contains_substring("VAL=sandbox_direnv_ok")
     );
 }

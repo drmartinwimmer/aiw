@@ -2,7 +2,15 @@
   "$schema": "https://raw.githubusercontent.com/fencesandbox/fence/main/docs/schema/fence.schema.json",
   "extends": "code",
   "network": {
-    "allowLocalOutbound": false
+    "allowLocalOutbound": false,
+    "allowedDomains": [
+      "*.googleapis.com",
+      "*.google.com",
+      "*.googleusercontent.com",
+      "*.gstatic.com",
+      "daily-cloudcode-pa.googleapis.com",
+      "cloudcode-pa.googleapis.com"
+    ]
   },
   "filesystem": {
     "allowRead": [
@@ -14,7 +22,9 @@
       ".git/**",
       "../../.jj/**",
       "../../.git/**",
-      ".workspaces/**"
+      ".workspaces/**",
+      "~/.gemini/**",
+      "~/.local/share/keyrings/**"
     ]
   },
   "command": {
