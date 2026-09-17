@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fencesandbox/fence/main/docs/schema/fence.schema.json",
+  "extends": "code",
+  "network": {
+    "allowLocalOutbound": false
+  },
+  "filesystem": {
+    "allowRead": [
+      "/nix"
+    ],
+    "allowWrite": [
+      ".",
+      ".jj/**",
+      ".git/**",
+      "../../.jj/**",
+      "../../.git/**",
+      ".workspaces/**"
+    ]
+  },
+  "command": {
+    "acceptSharedBinaryCannotRuntimeDeny": [
+      "chroot"
+    ]
+  }
+}

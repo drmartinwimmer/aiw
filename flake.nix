@@ -33,6 +33,7 @@
           cargoLock.lockFile = ./Cargo.lock;
           nativeCheckInputs = [
             pkgs.jujutsu
+            pkgs.fence
             pkgs.bubblewrap
           ];
           preCheck = ''

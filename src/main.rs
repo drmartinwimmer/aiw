@@ -10,7 +10,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug, PartialEq, Eq)]
 enum Commands {
-    /// Launch agy in an isolated Bubblewrap sandbox for a Jujutsu workspace
+    /// Launch agy in an isolated Fence sandbox for a Jujutsu workspace
     Agy(AgyCommand),
 }
 
@@ -27,7 +27,7 @@ struct AgyCommand {
     /// Workspace name under .workspaces/<workspace-name>
     workspace_name: String,
 
-    /// Print generated Bubblewrap command without executing
+    /// Print generated Fence command without executing
     #[arg(long)]
     dry_run: bool,
 
@@ -41,23 +41,23 @@ impl AgyCommand {
         let current_dir = std::env::current_dir()?;
         let repo_root = aiw::workspace::find_jj_root(&current_dir)?;
         let workspace_path = aiw::workspace::ensure_workspace(&repo_root, &self.workspace_name)?;
-        let config = aiw::config::AiwConfig::find_and_load(&repo_root)?;
-        let effective_tools = config.effective_tools();
+
+        if repo_root.join("aiw.json").exists() {
+            let _ = aiw::config::AiwConfig::find_and_load(&repo_root)?;
+        }
 
         let sandbox_config = aiw::sandbox::SandboxConfig {
             repo_root: &repo_root,
             workspace_path: &workspace_path,
-            tools: &effective_tools,
             extra_args: &self.extra_args,
-            home_dir: None,
-            network: config.network,
+            settings_path: None,
         };
 
         let builder = aiw::sandbox::SandboxBuilder::new(sandbox_config);
 
         if self.dry_run {
             let args = builder.build_args()?;
-            println!("bwrap {}", args.join(" "));
+            println!("fence {}", args.join(" "));
             Ok(ExitCode::SUCCESS)
         } else {
             let status = builder.run()?;

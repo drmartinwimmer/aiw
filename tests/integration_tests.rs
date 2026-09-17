@@ -23,6 +23,20 @@ fn init_test_jj_repo(path: &Path) {
     }
 }
 
+fn write_test_fence_json(repo_root: &Path) {
+    let content = r#"{
+  "extends": "code",
+  "filesystem": {
+    "allowRead": ["/nix"],
+    "allowWrite": [".", ".jj/**", ".git/**", "../../.jj/**", "../../.git/**", ".workspaces/**"]
+  },
+  "command": {
+    "acceptSharedBinaryCannotRuntimeDeny": ["chroot"]
+  }
+}"#;
+    std::fs::write(repo_root.join("fence.json"), content).expect("write fence.json");
+}
+
 fn run_aiw(cwd: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_aiw"))
         .args(args)
@@ -36,9 +50,7 @@ fn workspace_creation_and_dry_run_in_real_jj_repo_succeeds() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let repo_root = temp_dir.path();
     init_test_jj_repo(repo_root);
-
-    let config_content = r#"{"tools": ["cargo", "rustc"]}"#;
-    std::fs::write(repo_root.join("aiw.json"), config_content).expect("write aiw.json");
+    write_test_fence_json(repo_root);
 
     let output = run_aiw(repo_root, &["agy", "test-workspace", "--dry-run"]);
     expect_that!(output.status.success(), is_true());
@@ -48,25 +60,11 @@ fn workspace_creation_and_dry_run_in_real_jj_repo_succeeds() {
     expect_that!(ws_path.join(".jj").exists(), is_true());
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    expect_that!(stdout.as_ref(), starts_with("bwrap "));
-    expect_that!(stdout.as_ref(), contains_substring("--bind"));
+    expect_that!(stdout.as_ref(), starts_with("fence "));
+    expect_that!(stdout.as_ref(), contains_substring("--settings"));
 
-    let ws_path_str = ws_path.to_string_lossy();
-    expect_that!(stdout.as_ref(), contains_substring(ws_path_str.as_ref()));
-
-    let repo_jj_str = repo_root.join(".jj").to_string_lossy().to_string();
-    expect_that!(stdout.as_ref(), contains_substring(repo_jj_str.as_str()));
-
-    let repo_git_str = repo_root.join(".git").to_string_lossy().to_string();
-    expect_that!(stdout.as_ref(), contains_substring(repo_git_str.as_str()));
-
-    if std::env::var_os("HOME")
-        .map(std::path::PathBuf::from)
-        .is_some_and(|h| h.join(".gemini").exists())
-    {
-        expect_that!(stdout.as_ref(), contains_substring(".gemini"));
-    }
-    expect_that!(stdout.as_ref(), contains_substring("--chdir"));
+    let fence_json_str = repo_root.join("fence.json").to_string_lossy().to_string();
+    expect_that!(stdout.as_ref(), contains_substring(fence_json_str.as_str()));
     expect_that!(stdout.as_ref(), contains_substring("agy"));
     expect_that!(
         stdout.as_ref(),
@@ -79,9 +77,7 @@ fn idempotent_workspace_reuse_in_real_jj_repo_succeeds() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let repo_root = temp_dir.path();
     init_test_jj_repo(repo_root);
-
-    let config_content = r#"{"tools": ["cargo"]}"#;
-    std::fs::write(repo_root.join("aiw.json"), config_content).expect("write aiw.json");
+    write_test_fence_json(repo_root);
 
     // Initial run creates workspace
     let first_output = run_aiw(repo_root, &["agy", "reused-workspace", "--dry-run"]);
@@ -96,10 +92,7 @@ fn idempotent_workspace_reuse_in_real_jj_repo_succeeds() {
     expect_that!(second_output.status.success(), is_true());
 
     let stdout = String::from_utf8_lossy(&second_output.stdout);
-    expect_that!(
-        stdout.as_ref(),
-        contains_substring(ws_path.to_string_lossy().as_ref())
-    );
+    expect_that!(stdout.as_ref(), starts_with("fence "));
 
     // Verify Jujutsu lists this workspace
     let ws_list = Command::new("jj")
@@ -129,28 +122,6 @@ fn missing_jj_repository_fails_with_clear_error() {
 }
 
 #[googletest::test]
-fn missing_tool_in_config_fails_with_diagnostic_error() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
-    let repo_root = temp_dir.path();
-    init_test_jj_repo(repo_root);
-
-    let config_content = r#"{"tools": ["non_existent_tool_xyz123"]}"#;
-    std::fs::write(repo_root.join("aiw.json"), config_content).expect("write aiw.json");
-
-    let output = run_aiw(repo_root, &["agy", "test-workspace", "--dry-run"]);
-    expect_that!(output.status.success(), is_false());
-    expect_that!(output.status.code(), eq(Some(1)));
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    expect_that!(
-        stderr.as_ref(),
-        contains_substring(
-            "Error: Required host tool 'non_existent_tool_xyz123' could not be found in PATH"
-        )
-    );
-}
-
-#[googletest::test]
 fn invalid_config_json_fails_with_parse_error() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let repo_root = temp_dir.path();
@@ -170,20 +141,18 @@ fn invalid_config_json_fails_with_parse_error() {
 }
 
 #[googletest::test]
-fn live_bwrap_execution_in_temp_workspace_runs_and_verifies_containment() {
-    if which::which("bwrap").is_err() || which::which("agy").is_err() {
-        eprintln!("Skipping live_bwrap_execution test: bwrap or agy not found in PATH");
+fn live_fence_execution_in_temp_workspace_runs_and_verifies_containment() {
+    if which::which("fence").is_err() || which::which("agy").is_err() {
+        eprintln!("Skipping live_fence_execution test: fence or agy not found in PATH");
         return;
     }
 
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let repo_root = temp_dir.path();
     init_test_jj_repo(repo_root);
+    write_test_fence_json(repo_root);
 
-    let config_content = r#"{"tools": ["cargo"]}"#;
-    std::fs::write(repo_root.join("aiw.json"), config_content).expect("write aiw.json");
-
-    // Invoke live container execution forwarding `--version` to agy inside the sandbox
+    // Invoke live container execution forwarding `--version` to agy inside fence
     let output = run_aiw(repo_root, &["agy", "live-workspace", "--", "--version"]);
 
     expect_that!(output.status.success(), is_true());
@@ -197,79 +166,43 @@ fn live_bwrap_execution_in_temp_workspace_runs_and_verifies_containment() {
 }
 
 #[googletest::test]
-fn config_with_default_tools_and_network_flag_in_real_repo() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
-    let repo_root = temp_dir.path();
-    init_test_jj_repo(repo_root);
-
-    let config_content = r#"{"default_tools": true, "network": true}"#;
-    std::fs::write(repo_root.join("aiw.json"), config_content).expect("write aiw.json");
-
-    let output = run_aiw(repo_root, &["agy", "default-tools-ws", "--dry-run"]);
-    expect_that!(output.status.success(), is_true());
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    expect_that!(stdout.as_ref(), contains_substring("--share-net"));
-}
-
-#[googletest::test]
-fn config_with_network_false_omits_share_net_in_dry_run() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
-    let repo_root = temp_dir.path();
-    init_test_jj_repo(repo_root);
-
-    let config_content = r#"{"tools": ["cargo"], "network": false}"#;
-    std::fs::write(repo_root.join("aiw.json"), config_content).expect("write aiw.json");
-
-    let output = run_aiw(repo_root, &["agy", "no-net-ws", "--dry-run"]);
-    expect_that!(output.status.success(), is_true());
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    expect_that!(stdout.as_ref(), not(contains_substring("--share-net")));
-}
-
-#[googletest::test]
-fn jj_commands_in_sandbox_execute_successfully_and_persist_commits() {
-    if which::which("bwrap").is_err() || which::which("jj").is_err() {
-        eprintln!("Skipping jj_commands_in_sandbox test: bwrap or jj not found in PATH");
+fn jj_commands_in_fence_sandbox_execute_successfully_and_persist_commits() {
+    if which::which("fence").is_err() || which::which("jj").is_err() {
+        eprintln!("Skipping jj_commands_in_fence_sandbox test: fence or jj not found in PATH");
         return;
     }
 
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let repo_root = temp_dir.path();
     init_test_jj_repo(repo_root);
+    write_test_fence_json(repo_root);
 
-    let config_content = r#"{"tools": ["jj"]}"#;
-    std::fs::write(repo_root.join("aiw.json"), config_content).expect("write aiw.json");
-
-    let ws_path = aiw::workspace::ensure_workspace(repo_root, "jj-sandbox-test")
+    let ws_path = aiw::workspace::ensure_workspace(repo_root, "jj-fence-test")
         .expect("ensure_workspace");
 
-    let tools = vec!["jj".to_string()];
     let config = aiw::sandbox::SandboxConfig {
         repo_root,
         workspace_path: &ws_path,
-        tools: &tools,
         extra_args: &[],
-        home_dir: None,
-        network: false,
+        settings_path: None,
     };
     let builder = aiw::sandbox::SandboxBuilder::new(config);
-    let mut bwrap_args = builder.build_args().expect("build_args");
-
-    // Verify .git is mounted
-    let repo_git_str = repo_root.join(".git").display().to_string();
-    expect_that!(bwrap_args, contains(eq(&repo_git_str)));
+    let mut fence_args = builder.build_args().expect("build_args");
 
     // Replace trailing agy invocation with jj --no-pager status
-    let dash_pos = bwrap_args.iter().position(|a| a == "--").expect("contains --");
-    bwrap_args.truncate(dash_pos);
-    bwrap_args.extend(["--".into(), "jj".into(), "--no-pager".into(), "status".into()]);
+    let dash_pos = fence_args.iter().position(|a| a == "--").expect("contains --");
+    fence_args.truncate(dash_pos);
+    fence_args.extend(["--".into(), "jj".into(), "--no-pager".into(), "status".into()]);
 
-    let status_output = Command::new("bwrap")
-        .args(&bwrap_args)
-        .output()
-        .expect("execute bwrap jj status");
+    let mut status_cmd = Command::new("fence");
+    status_cmd.current_dir(&ws_path);
+    status_cmd.args(&fence_args);
+    if let Ok(tmp) = std::env::var("TMPDIR")
+        && !Path::new(&tmp).exists()
+    {
+        status_cmd.env("TMPDIR", "/tmp");
+    }
+    let status_output = status_cmd.output().expect("execute fence jj status");
 
     expect_that!(status_output.status.success(), is_true());
     let status_stdout = String::from_utf8_lossy(&status_output.stdout);
@@ -278,21 +211,26 @@ fn jj_commands_in_sandbox_execute_successfully_and_persist_commits() {
         contains_substring("The working copy has no changes")
     );
 
-    // Test mutating jj command inside sandbox: jj --no-pager new -m "sandbox-commit"
-    bwrap_args.truncate(dash_pos);
-    bwrap_args.extend([
+    // Test mutating jj command inside fence: jj --no-pager new -m "commit from inside fence"
+    fence_args.truncate(dash_pos);
+    fence_args.extend([
         "--".into(),
         "jj".into(),
         "--no-pager".into(),
         "new".into(),
         "-m".into(),
-        "commit from inside sandbox".into(),
+        "commit from inside fence".into(),
     ]);
 
-    let new_output = Command::new("bwrap")
-        .args(&bwrap_args)
-        .output()
-        .expect("execute bwrap jj new");
+    let mut new_cmd = Command::new("fence");
+    new_cmd.current_dir(&ws_path);
+    new_cmd.args(&fence_args);
+    if let Ok(tmp) = std::env::var("TMPDIR")
+        && !Path::new(&tmp).exists()
+    {
+        new_cmd.env("TMPDIR", "/tmp");
+    }
+    let new_output = new_cmd.output().expect("execute fence jj new");
 
     expect_that!(new_output.status.success(), is_true());
 
@@ -307,7 +245,6 @@ fn jj_commands_in_sandbox_execute_successfully_and_persist_commits() {
     let log_stdout = String::from_utf8_lossy(&log_output.stdout);
     expect_that!(
         log_stdout.as_ref(),
-        contains_substring("commit from inside sandbox")
+        contains_substring("commit from inside fence")
     );
 }
-

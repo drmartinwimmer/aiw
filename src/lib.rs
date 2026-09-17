@@ -1,7 +1,7 @@
 //! `aiw` library crate.
 //!
 //! Provides configuration parsing, Jujutsu workspace management,
-//! and Bubblewrap sandbox execution for AI developer workflows.
+//! and Fence sandbox execution for AI developer workflows.
 
 pub mod config;
 pub use config::{AiwConfig, ConfigError};
