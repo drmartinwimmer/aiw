@@ -36,14 +36,10 @@ fn normalize_search_dir(start_dir: &Path) -> Result<PathBuf, std::io::Error> {
 }
 
 fn execute_jj_root(dir: &Path) -> Result<PathBuf, WorkspaceError> {
-    let output = match std::process::Command::new("jj")
+    let output = std::process::Command::new("jj")
         .args(["--no-pager", "root"])
         .current_dir(dir)
-        .output()
-    {
-        Ok(out) => out,
-        Err(err) => return Err(WorkspaceError::Io(err)),
-    };
+        .output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -114,16 +110,12 @@ fn execute_jj_workspace_add(
     rel_workspace_path: &Path,
     workspace_name: &str,
 ) -> Result<(), WorkspaceError> {
-    let output = match std::process::Command::new("jj")
+    let output = std::process::Command::new("jj")
         .args(["--no-pager", "workspace", "add"])
         .arg(rel_workspace_path)
         .args(["--name", workspace_name])
         .current_dir(repo_root)
-        .output()
-    {
-        Ok(out) => out,
-        Err(err) => return Err(WorkspaceError::Io(err)),
-    };
+        .output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -159,14 +151,10 @@ fn execute_jj_workspace_forget(
     repo_root: &Path,
     workspace_name: &str,
 ) -> Result<(), WorkspaceError> {
-    let output = match std::process::Command::new("jj")
+    let output = std::process::Command::new("jj")
         .args(["--no-pager", "workspace", "forget", workspace_name])
         .current_dir(repo_root)
-        .output()
-    {
-        Ok(out) => out,
-        Err(err) => return Err(WorkspaceError::Io(err)),
-    };
+        .output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

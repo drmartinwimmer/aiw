@@ -19,31 +19,6 @@ pub struct SandboxConfig<'a> {
     pub use_direnv: bool,
 }
 
-/// Locates the `direnv` executable on the host system.
-#[must_use]
-pub fn find_direnv() -> Option<PathBuf> {
-    if let Ok(path) = which::which("direnv") {
-        return Some(path);
-    }
-    if let Ok(user) = std::env::var("USER") {
-        let profile_bin = PathBuf::from(format!("/etc/profiles/per-user/{user}/bin/direnv"));
-        if profile_bin.exists() {
-            return Some(profile_bin);
-        }
-    }
-    if let Ok(home) = std::env::var("HOME") {
-        let nix_home = PathBuf::from(home).join(".nix-profile/bin/direnv");
-        if nix_home.exists() {
-            return Some(nix_home);
-        }
-    }
-    let sys_path = PathBuf::from("/run/current-system/sw/bin/direnv");
-    if sys_path.exists() {
-        return Some(sys_path);
-    }
-    None
-}
-
 #[derive(Debug)]
 pub struct SandboxBuilder<'a> {
     config: SandboxConfig<'a>,
@@ -126,31 +101,7 @@ impl<'a> SandboxBuilder<'a> {
         cmd.current_dir(self.config.workspace_path);
         cmd.args(args);
 
-        // Ensure user profile bin paths are in PATH so fence can find tools like direnv
-        if let Ok(path_var) = std::env::var("PATH") {
-            let mut paths: Vec<PathBuf> = std::env::split_paths(&path_var).collect();
-            let mut updated = false;
-
-            if let Ok(user) = std::env::var("USER") {
-                let user_bin = PathBuf::from(format!("/etc/profiles/per-user/{user}/bin"));
-                if user_bin.exists() && !paths.contains(&user_bin) {
-                    paths.push(user_bin);
-                    updated = true;
-                }
-            }
-            if let Ok(home) = std::env::var("HOME") {
-                let nix_bin = PathBuf::from(home).join(".nix-profile/bin");
-                if nix_bin.exists() && !paths.contains(&nix_bin) {
-                    paths.push(nix_bin);
-                    updated = true;
-                }
-            }
-            if updated
-                && let Ok(new_path) = std::env::join_paths(paths)
-            {
-                cmd.env("PATH", new_path);
-            }
-        }
+        ensure_user_profile_bin_paths(&mut cmd);
 
         // In environments where TMPDIR points to a non-existent directory, fallback to /tmp
         if let Ok(tmp) = std::env::var("TMPDIR")
@@ -170,6 +121,37 @@ impl<'a> SandboxBuilder<'a> {
             .stderr(std::process::Stdio::inherit());
         let status = cmd.status()?;
         Ok(status)
+    }
+}
+
+/// Ensures user profile binary paths (such as Nix user and home-manager profiles)
+/// are present in PATH so that sandboxed environments can locate tools like direnv.
+fn ensure_user_profile_bin_paths(cmd: &mut Command) {
+    let Ok(path_var) = std::env::var("PATH") else {
+        return;
+    };
+
+    let mut paths: Vec<PathBuf> = std::env::split_paths(&path_var).collect();
+    let mut updated = false;
+
+    if let Ok(user) = std::env::var("USER") {
+        let user_bin = PathBuf::from(format!("/etc/profiles/per-user/{user}/bin"));
+        if user_bin.exists() && !paths.contains(&user_bin) {
+            paths.push(user_bin);
+            updated = true;
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let nix_bin = PathBuf::from(home).join(".nix-profile/bin");
+        if nix_bin.exists() && !paths.contains(&nix_bin) {
+            paths.push(nix_bin);
+            updated = true;
+        }
+    }
+    if updated
+        && let Ok(new_path) = std::env::join_paths(paths)
+    {
+        cmd.env("PATH", new_path);
     }
 }
 

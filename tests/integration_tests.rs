@@ -315,7 +315,7 @@ fn forget_subcommand_removes_workspace_from_jj_list() {
 
 #[googletest::test]
 fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
-    if which::which("fence").is_err() || aiw::sandbox::find_direnv().is_none() {
+    if which::which("fence").is_err() || which::which("direnv").is_err() {
         eprintln!("Skipping sandbox_command_runs_in_correct_working_directory_and_loads_direnv: fence or direnv not found");
         return;
     }
@@ -337,8 +337,7 @@ fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
     .expect("write .envrc");
 
     // Allow direnv for this directory
-    let direnv_bin = aiw::sandbox::find_direnv().expect("direnv bin");
-    let allow_output = Command::new(&direnv_bin)
+    let allow_output = Command::new("direnv")
         .args(["allow"])
         .current_dir(&ws_path)
         .output()

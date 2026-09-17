@@ -70,7 +70,7 @@ impl AgyCommand {
             command: None,
             extra_args: &self.extra_args,
             settings_path: None,
-            use_direnv: aiw::sandbox::find_direnv().is_some(),
+            use_direnv: which::which("direnv").is_ok(),
         };
 
         let builder = aiw::sandbox::SandboxBuilder::new(sandbox_config);
