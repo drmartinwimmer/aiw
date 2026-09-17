@@ -8,4 +8,7 @@ pub use config::{AiwConfig, ConfigError};
 pub mod workspace;
 pub use workspace::{WorkspaceError, ensure_workspace, find_jj_root, forget_workspace};
 pub mod sandbox;
-pub use sandbox::{SandboxBuilder, SandboxConfig, SandboxError, allow_direnv_if_present};
+pub use sandbox::{
+    SandboxBuilder, SandboxConfig, SandboxError, allow_direnv_if_repo_root_allowed,
+    is_direnv_allowed,
+};

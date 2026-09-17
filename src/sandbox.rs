@@ -97,7 +97,7 @@ impl<'a> SandboxBuilder<'a> {
     /// Builds the std::process::Command prepared to execute fence.
     pub fn build_command(&self) -> Result<Command, SandboxError> {
         if self.config.use_direnv {
-            allow_direnv_if_present(self.config.workspace_path);
+            allow_direnv_if_repo_root_allowed(self.config.repo_root, self.config.workspace_path);
         }
 
         let args = self.build_args()?;
@@ -159,19 +159,74 @@ fn ensure_user_profile_bin_paths(cmd: &mut Command) {
     }
 }
 
-/// If direnv is present on PATH and the workspace directory contains `.envrc` or `.env`,
-/// runs `direnv allow` on that directory so direnv does not block execution.
-pub fn allow_direnv_if_present(workspace_path: &Path) {
+/// Checks if `direnv` is allowed in the specified directory by inspecting `direnv status --json`.
+/// Returns `true` only if `direnv` finds an `.envrc` or `.env` in `dir` and its `allowed` status is 0.
+#[must_use]
+pub fn is_direnv_allowed(dir: &Path) -> bool {
+    if which::which("direnv").is_err() {
+        return false;
+    }
+
+    if !dir.exists() || (!dir.join(".envrc").exists() && !dir.join(".env").exists()) {
+        return false;
+    }
+
+    let mut cmd = Command::new("direnv");
+    cmd.args(["status", "--json"]);
+    cmd.current_dir(dir);
+    ensure_user_profile_bin_paths(&mut cmd);
+
+    let output = match cmd.output() {
+        Ok(out) if out.status.success() => out,
+        _ => return false,
+    };
+
+    #[derive(serde::Deserialize)]
+    struct DirenvStatus {
+        state: Option<DirenvState>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct DirenvState {
+        #[serde(rename = "foundRC")]
+        found_rc: Option<FoundRc>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct FoundRc {
+        allowed: i32,
+    }
+
+    let parsed: DirenvStatus = match serde_json::from_slice(&output.stdout) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    parsed
+        .state
+        .and_then(|s| s.found_rc)
+        .is_some_and(|rc| rc.allowed == 0)
+}
+
+/// If direnv is present on PATH, the workspace directory contains `.envrc` or `.env`,
+/// and the repository root directory is allowed by direnv, runs `direnv allow` on the workspace
+/// directory so direnv does not block execution.
+pub fn allow_direnv_if_repo_root_allowed(repo_root: &Path, workspace_path: &Path) {
     if which::which("direnv").is_err() {
         return;
     }
-    if workspace_path.join(".envrc").exists() || workspace_path.join(".env").exists() {
-        let mut cmd = Command::new("direnv");
-        cmd.args(["allow"]).arg(workspace_path);
-        ensure_user_profile_bin_paths(&mut cmd);
-        match cmd.output() {
-            Ok(_) | Err(_) => {}
-        }
+    if !workspace_path.join(".envrc").exists() && !workspace_path.join(".env").exists() {
+        return;
+    }
+    if !is_direnv_allowed(repo_root) {
+        return;
+    }
+
+    let mut cmd = Command::new("direnv");
+    cmd.args(["allow"]).arg(workspace_path);
+    ensure_user_profile_bin_paths(&mut cmd);
+    match cmd.output() {
+        Ok(_) | Err(_) => {}
     }
 }
 
@@ -466,5 +521,35 @@ mod tests {
 
         expect_that!(cmd.get_program(), eq("fence"));
         expect_that!(cmd.get_current_dir(), some(eq(&workspace_path)));
+    }
+
+    #[googletest::test]
+    fn is_direnv_allowed_returns_false_for_directory_without_envrc() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        expect_that!(is_direnv_allowed(temp_dir.path()), is_false());
+    }
+
+    #[googletest::test]
+    fn is_direnv_allowed_checks_authorization_status() {
+        if which::which("direnv").is_err() {
+            return;
+        }
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let envrc = temp_dir.path().join(".envrc");
+        std::fs::write(&envrc, "export TEST_VAR=1\n").expect("write .envrc");
+
+        // Before allow, should be false
+        expect_that!(is_direnv_allowed(temp_dir.path()), is_false());
+
+        // Allow it
+        let allow_res = Command::new("direnv")
+            .args(["allow"])
+            .current_dir(temp_dir.path())
+            .output()
+            .expect("direnv allow");
+        assert!(allow_res.status.success());
+
+        // After allow, should be true
+        expect_that!(is_direnv_allowed(temp_dir.path()), is_true());
     }
 }

@@ -325,6 +325,21 @@ fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
     init_test_jj_repo(repo_root);
     write_test_fence_json(repo_root);
 
+    // Write .envrc in repo_root and allow it so repo root is allowed
+    let repo_envrc = repo_root.join(".envrc");
+    std::fs::write(
+        &repo_envrc,
+        "export PATH=\"/bin:/usr/bin:$PATH\"\nexport AIW_DIRENV_LOADED=sandbox_direnv_ok\n",
+    )
+    .expect("write repo .envrc");
+
+    let allow_repo = Command::new("direnv")
+        .args(["allow"])
+        .current_dir(repo_root)
+        .output()
+        .expect("direnv allow on repo root");
+    assert!(allow_repo.status.success(), "allow repo root failed");
+
     let ws_path = aiw::workspace::ensure_workspace(repo_root, "direnv-ws")
         .expect("ensure_workspace");
 
@@ -336,7 +351,7 @@ fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
     )
     .expect("write .envrc");
 
-    // Execute command in sandbox using SandboxBuilder (which automatically runs allow_direnv_if_present)
+    // Execute command in sandbox using SandboxBuilder (which automatically checks repo_root and allows ws_path)
     let sh_bin = if Path::new("/bin/sh").exists() {
         "/bin/sh"
     } else {
@@ -379,4 +394,35 @@ fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
         stdout.as_ref(),
         contains_substring("VAL=sandbox_direnv_ok")
     );
+}
+
+#[googletest::test]
+fn sandbox_does_not_auto_allow_direnv_when_repo_root_is_not_allowed() {
+    if which::which("fence").is_err() || which::which("direnv").is_err() {
+        eprintln!("Skipping sandbox_does_not_auto_allow_direnv_when_repo_root_is_not_allowed: fence or direnv not found");
+        return;
+    }
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let repo_root = temp_dir.path();
+    init_test_jj_repo(repo_root);
+    write_test_fence_json(repo_root);
+
+    // Write .envrc in repo_root but do NOT allow it
+    let repo_envrc = repo_root.join(".envrc");
+    std::fs::write(&repo_envrc, "export BLOCKED=1\n").expect("write repo .envrc");
+
+    let ws_path = aiw::workspace::ensure_workspace(repo_root, "unallowed-ws")
+        .expect("ensure_workspace");
+    let ws_envrc = ws_path.join(".envrc");
+    std::fs::write(&ws_envrc, "export BLOCKED=1\n").expect("write ws .envrc");
+
+    // repo_root is NOT allowed
+    expect_that!(aiw::sandbox::is_direnv_allowed(repo_root), is_false());
+
+    // Call allow_direnv_if_repo_root_allowed
+    aiw::sandbox::allow_direnv_if_repo_root_allowed(repo_root, &ws_path);
+
+    // ws_path should NOT have been allowed!
+    expect_that!(aiw::sandbox::is_direnv_allowed(&ws_path), is_false());
 }
