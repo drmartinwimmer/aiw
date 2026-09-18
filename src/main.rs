@@ -56,6 +56,15 @@ struct AgyCommand {
 }
 
 impl AgyCommand {
+    fn build_payload_command(&self) -> Vec<String> {
+        let mut cmd = vec!["agy".to_string()];
+        if !self.extra_args.iter().any(|a| a == "--dangerously-skip-permissions") {
+            cmd.push("--dangerously-skip-permissions".to_string());
+        }
+        cmd.extend(self.extra_args.clone());
+        cmd
+    }
+
     fn run(&self) -> Result<ExitCode, AppError> {
         let current_dir = std::env::current_dir()?;
         let repo_root = aiw::workspace::find_jj_root(&current_dir)?;
@@ -72,13 +81,12 @@ impl AgyCommand {
             direnv.allow_workspace(workspace.path());
         }
 
-        let builder = aiw::sandbox::SandboxBuilder::for_workspace(&workspace)
-            .extra_args(&self.extra_args)
+        let payload = self.build_payload_command();
+        let builder = aiw::sandbox::SandboxBuilder::for_workspace(&workspace, &payload)
             .use_direnv(direnv.is_allowed());
 
         if self.dry_run {
-            let cmd = builder.build_command()?;
-            println!("{}", aiw::sandbox::format_command(&cmd));
+            println!("{builder}");
             Ok(ExitCode::SUCCESS)
         } else {
             let status = builder.run()?;

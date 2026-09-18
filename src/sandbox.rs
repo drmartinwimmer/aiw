@@ -1,116 +1,50 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
-pub use crate::direnv::{
-    allow_direnv, allow_direnv_if_repo_root_allowed, is_direnv_allowed,
-};
-use crate::direnv::ensure_user_profile_bin_paths;
 use crate::workspace::Workspace;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SandboxError {
     #[error("Fence executable 'fence' not found in PATH")]
     FenceNotFound,
+    #[error("Invalid argument ordering: {0}")]
+    InvalidArgOrder(String),
     #[error("I/O error during sandbox execution: {0}")]
     Io(#[from] std::io::Error),
-}
-
-/// Formats a `Command` into a shell-style command line string suitable for display or dry-run.
-#[must_use]
-pub fn format_command(cmd: &Command) -> String {
-    let mut parts = Vec::new();
-    parts.push(cmd.get_program().to_string_lossy().into_owned());
-    for arg in cmd.get_args() {
-        parts.push(arg.to_string_lossy().into_owned());
-    }
-    parts.join(" ")
-}
-
-#[derive(Debug, Clone)]
-pub struct SandboxConfig<'a> {
-    pub repo_root: &'a Path,
-    pub workspace_path: &'a Path,
-    pub command: Option<&'a [String]>,
-    pub extra_args: &'a [String],
-    pub settings_path: Option<&'a Path>,
-    pub use_direnv: bool,
 }
 
 #[derive(Debug)]
 pub struct SandboxBuilder<'a> {
     workspace_path: &'a Path,
     repo_root: &'a Path,
-    command: Option<&'a [String]>,
-    extra_args: &'a [String],
+    command: &'a [String],
     settings_path: Option<&'a Path>,
     use_direnv: bool,
 }
 
 impl<'a> SandboxBuilder<'a> {
-    /// Creates a new `SandboxBuilder` for the specified workspace and repository root.
+    /// Creates a new `SandboxBuilder` for the specified workspace, repository root, and required payload command.
     #[must_use]
-    pub fn new(workspace_path: &'a Path, repo_root: &'a Path) -> Self {
+    pub fn new(workspace_path: &'a Path, repo_root: &'a Path, command: &'a [String]) -> Self {
         Self {
             workspace_path,
             repo_root,
-            command: None,
-            extra_args: &[],
+            command,
             settings_path: None,
             use_direnv: false,
         }
     }
 
-    /// Creates a new `SandboxBuilder` configured for the given `Workspace`.
+    /// Creates a new `SandboxBuilder` configured for the given `Workspace` and required payload command.
     #[must_use]
-    pub fn for_workspace(workspace: &'a Workspace) -> Self {
-        Self::new(workspace.path(), workspace.repo_root())
-    }
-
-    /// Constructs a `SandboxBuilder` from a prefilled `SandboxConfig`.
-    #[must_use]
-    pub fn from_config(config: SandboxConfig<'a>) -> Self {
-        Self {
-            workspace_path: config.workspace_path,
-            repo_root: config.repo_root,
-            command: config.command,
-            extra_args: config.extra_args,
-            settings_path: config.settings_path,
-            use_direnv: config.use_direnv,
-        }
-    }
-
-    /// Sets the command payload to execute inside the fence container.
-    #[must_use]
-    pub fn command(mut self, command: &'a [String]) -> Self {
-        self.command = Some(command);
-        self
-    }
-
-    /// Sets the optional command payload to execute inside the fence container.
-    #[must_use]
-    pub fn optional_command(mut self, command: Option<&'a [String]>) -> Self {
-        self.command = command;
-        self
-    }
-
-    /// Extra arguments forwarded to the payload command (such as agy).
-    #[must_use]
-    pub fn extra_args(mut self, extra_args: &'a [String]) -> Self {
-        self.extra_args = extra_args;
-        self
+    pub fn for_workspace(workspace: &'a Workspace, command: &'a [String]) -> Self {
+        Self::new(workspace.path(), workspace.repo_root(), command)
     }
 
     /// Explicit path to fence settings file (`fence.json` or `fence.jsonc`).
     #[must_use]
     pub fn settings_path(mut self, settings_path: &'a Path) -> Self {
         self.settings_path = Some(settings_path);
-        self
-    }
-
-    /// Sets the optional fence settings file path.
-    #[must_use]
-    pub fn optional_settings_path(mut self, settings_path: Option<&'a Path>) -> Self {
-        self.settings_path = settings_path;
         self
     }
 
@@ -129,29 +63,17 @@ impl<'a> SandboxBuilder<'a> {
         }
     }
 
-    fn append_direnv_args(&self, cmd: &mut Command) {
-        if self.use_direnv {
-            cmd.args(["direnv", "exec", "."]);
+    pub(crate) fn append_direnv_args(&self, cmd: &mut Command) -> Result<(), SandboxError> {
+        if !self.use_direnv {
+            return Ok(());
         }
-    }
-
-    fn append_command_args(&self, cmd: &mut Command) {
-        if let Some(command) = self.command {
-            cmd.args(command);
-        } else {
-            cmd.arg("agy");
-            if !self
-                .extra_args
-                .iter()
-                .any(|a| a == "--dangerously-skip-permissions")
-            {
-                cmd.arg("--dangerously-skip-permissions");
-            }
+        if cmd.get_args().last() != Some(std::ffi::OsStr::new("--")) {
+            return Err(SandboxError::InvalidArgOrder(
+                "direnv arguments must be appended immediately after '--'".to_string(),
+            ));
         }
-    }
-
-    fn append_extra_args(&self, cmd: &mut Command) {
-        cmd.args(self.extra_args);
+        cmd.args(["direnv", "exec", "."]);
+        Ok(())
     }
 
     fn resolve_settings_path(&self) -> Option<PathBuf> {
@@ -182,11 +104,10 @@ impl<'a> SandboxBuilder<'a> {
 
         self.append_settings_args(&mut cmd);
         cmd.arg("--");
-        self.append_direnv_args(&mut cmd);
-        self.append_command_args(&mut cmd);
-        self.append_extra_args(&mut cmd);
+        self.append_direnv_args(&mut cmd)?;
+        cmd.args(self.command);
 
-        ensure_user_profile_bin_paths(&mut cmd);
+        crate::direnv::ensure_user_profile_bin_paths(&mut cmd);
 
         // In environments where TMPDIR points to a non-existent directory, fallback to /tmp
         if let Ok(tmp) = std::env::var("TMPDIR")
@@ -196,12 +117,6 @@ impl<'a> SandboxBuilder<'a> {
         }
 
         Ok(cmd)
-    }
-
-    /// Builds and formats the command into a string for dry run or display.
-    pub fn format_command(&self) -> Result<String, SandboxError> {
-        let cmd = self.build_command()?;
-        Ok(format_command(&cmd))
     }
 
     /// Executes fence synchronously, forwarding standard I/O and returning its ExitStatus.
@@ -221,9 +136,22 @@ impl<'a> SandboxBuilder<'a> {
     }
 }
 
-impl<'a> From<SandboxConfig<'a>> for SandboxBuilder<'a> {
-    fn from(config: SandboxConfig<'a>) -> Self {
-        Self::from_config(config)
+impl std::fmt::Display for SandboxBuilder<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "fence")?;
+        if let Some(settings) = self.resolve_settings_path() {
+            write!(f, " --settings {}", settings.display())?;
+        } else {
+            write!(f, " --template code")?;
+        }
+        write!(f, " --")?;
+        if self.use_direnv {
+            write!(f, " direnv exec .")?;
+        }
+        for arg in self.command {
+            write!(f, " {arg}")?;
+        }
+        Ok(())
     }
 }
 
@@ -257,7 +185,8 @@ mod tests {
         let fence_json = repo_root.join("fence.json");
         std::fs::write(&fence_json, r#"{"extends": "code"}"#).expect("write fence.json");
 
-        let builder = SandboxBuilder::new(&workspace_path, &repo_root);
+        let cmd = vec!["agy".to_string(), "--dangerously-skip-permissions".to_string()];
+        let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd);
         let args = builder.build_args().expect("build_args should succeed");
 
         let fence_str = fence_json.display().to_string();
@@ -283,7 +212,8 @@ mod tests {
         let ws_fence = workspace_path.join("fence.jsonc");
         std::fs::write(&ws_fence, r#"{"extends": "code"}"#).expect("write ws fence");
 
-        let builder = SandboxBuilder::new(&workspace_path, &repo_root);
+        let cmd = vec!["agy".to_string()];
+        let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd);
         let args = builder.build_args().expect("build_args");
 
         let ws_fence_str = ws_fence.display().to_string();
@@ -300,7 +230,8 @@ mod tests {
         let workspace_path = repo_root.join(".workspaces").join("ws");
         std::fs::create_dir_all(&workspace_path).expect("create ws");
 
-        let builder = SandboxBuilder::new(&workspace_path, &repo_root);
+        let cmd = vec!["agy".to_string(), "--dangerously-skip-permissions".to_string()];
+        let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd);
         let args = builder.build_args().expect("build_args");
 
         expect_that!(
@@ -323,7 +254,8 @@ mod tests {
         let custom_fence = temp_dir.path().join("custom-fence.json");
         std::fs::write(&custom_fence, r#"{"extends": "code"}"#).expect("write custom fence");
 
-        let builder = SandboxBuilder::new(&workspace_path, &repo_root)
+        let cmd = vec!["agy".to_string()];
+        let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd)
             .settings_path(&custom_fence);
         let args = builder.build_args().expect("build_args");
 
@@ -335,60 +267,14 @@ mod tests {
     }
 
     #[googletest::test]
-    fn build_args_with_extra_args_forwards_arguments_to_agy() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
-        let repo_root = temp_dir.path().join("repo");
-        let workspace_path = repo_root.join(".workspaces").join("ws");
-        std::fs::create_dir_all(&workspace_path).expect("create ws");
-
-        let extra_args = vec!["--model".to_string(), "gemini-2.5".to_string()];
-        let builder = SandboxBuilder::new(&workspace_path, &repo_root)
-            .extra_args(&extra_args);
-        let args = builder.build_args().expect("build_args");
-
-        expect_that!(
-            args.as_slice(),
-            contains_subslice(&[
-                "--",
-                "agy",
-                "--dangerously-skip-permissions",
-                "--model",
-                "gemini-2.5"
-            ])
-        );
-    }
-
-    #[googletest::test]
-    fn build_args_avoids_duplicate_yolo_flag_if_present_in_extra_args() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
-        let repo_root = temp_dir.path().join("repo");
-        let workspace_path = repo_root.join(".workspaces").join("ws");
-        std::fs::create_dir_all(&workspace_path).expect("create ws");
-
-        let extra_args = vec![
-            "--dangerously-skip-permissions".to_string(),
-            "--prompt".to_string(),
-            "hello".to_string(),
-        ];
-        let builder = SandboxBuilder::new(&workspace_path, &repo_root)
-            .extra_args(&extra_args);
-        let args = builder.build_args().expect("build_args");
-
-        let yolo_count = args
-            .iter()
-            .filter(|a| a.as_str() == "--dangerously-skip-permissions")
-            .count();
-        expect_that!(yolo_count, eq(1));
-    }
-
-    #[googletest::test]
     fn build_args_with_use_direnv_true_prepends_direnv_exec() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let repo_root = temp_dir.path().join("repo");
         let workspace_path = repo_root.join(".workspaces").join("ws");
         std::fs::create_dir_all(&workspace_path).expect("create ws");
 
-        let builder = SandboxBuilder::new(&workspace_path, &repo_root)
+        let cmd = vec!["agy".to_string(), "--dangerously-skip-permissions".to_string()];
+        let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd)
             .use_direnv(true);
         let args = builder.build_args().expect("build_args");
 
@@ -413,8 +299,7 @@ mod tests {
         std::fs::create_dir_all(&workspace_path).expect("create ws");
 
         let custom_cmd = vec!["sh".to_string(), "-c".to_string(), "echo ok".to_string()];
-        let builder = SandboxBuilder::new(&workspace_path, &repo_root)
-            .command(&custom_cmd)
+        let builder = SandboxBuilder::new(&workspace_path, &repo_root, &custom_cmd)
             .use_direnv(true);
         let args = builder.build_args().expect("build_args");
 
@@ -431,7 +316,8 @@ mod tests {
         let workspace_path = repo_root.join(".workspaces").join("ws");
         std::fs::create_dir_all(&workspace_path).expect("create ws");
 
-        let builder = SandboxBuilder::new(&workspace_path, &repo_root);
+        let cmd_payload = vec!["agy".to_string()];
+        let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd_payload);
         let cmd = builder.build_command().expect("build_command");
 
         expect_that!(cmd.get_program(), eq("fence"));
@@ -439,22 +325,56 @@ mod tests {
     }
 
     #[googletest::test]
-    fn format_command_produces_readable_shell_string() {
+    fn append_direnv_args_called_out_of_order_returns_error() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = temp_dir.path();
+        let ws_path = repo_root.join("ws");
+        let cmd_payload = vec!["echo".to_string()];
+
+        let builder = SandboxBuilder::new(&ws_path, repo_root, &cmd_payload).use_direnv(true);
+
+        // Case 1: called on Command without "--" separator
+        let mut cmd1 = Command::new("fence");
+        let res1 = builder.append_direnv_args(&mut cmd1);
+        expect_that!(
+            res1,
+            matches_pattern!(Err(matches_pattern!(SandboxError::InvalidArgOrder(anything()))))
+        );
+
+        // Case 2: called after command arguments already present
+        let mut cmd2 = Command::new("fence");
+        cmd2.arg("--");
+        cmd2.arg("echo");
+        let res2 = builder.append_direnv_args(&mut cmd2);
+        expect_that!(
+            res2,
+            matches_pattern!(Err(matches_pattern!(SandboxError::InvalidArgOrder(anything()))))
+        );
+
+        // Case 3: called immediately after "--" succeeds
+        let mut cmd3 = Command::new("fence");
+        cmd3.arg("--");
+        let res3 = builder.append_direnv_args(&mut cmd3);
+        expect_that!(res3, ok(anything()));
+    }
+
+    #[googletest::test]
+    fn display_trait_produces_readable_shell_string() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let repo_root = temp_dir.path().join("repo");
         let workspace_path = repo_root.join(".workspaces").join("ws");
         std::fs::create_dir_all(&workspace_path).expect("create ws");
 
         let custom_cmd = vec!["sh".to_string(), "-c".to_string(), "echo hi".to_string()];
-        let builder = SandboxBuilder::new(&workspace_path, &repo_root)
-            .command(&custom_cmd)
+        let builder = SandboxBuilder::new(&workspace_path, &repo_root, &custom_cmd)
             .use_direnv(true);
 
-        let formatted = builder.format_command().expect("format_command");
+        let formatted = format!("{builder}");
         expect_that!(
             formatted.as_str(),
             eq("fence --template code -- direnv exec . sh -c echo hi")
         );
+        expect_that!(builder.to_string().as_str(), eq(formatted.as_str()));
     }
 
     #[googletest::test]
@@ -469,14 +389,17 @@ mod tests {
         assert!(output.status.success());
 
         let ws = Workspace::new(repo_root, "builder-ws").expect("new workspace");
-        let extra = vec!["--extra-flag".to_string()];
-        let builder = SandboxBuilder::for_workspace(&ws)
-            .extra_args(&extra)
+        let cmd_payload = vec![
+            "agy".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+            "--extra-flag".to_string(),
+        ];
+        let builder = SandboxBuilder::for_workspace(&ws, &cmd_payload)
             .use_direnv(true);
 
         let cmd = builder.build_command().expect("build_command");
         expect_that!(cmd.get_current_dir(), some(eq(ws.path())));
-        let formatted = format_command(&cmd);
+        let formatted = format!("{builder}");
         expect_that!(
             formatted.as_str(),
             contains_substring("direnv exec . agy --dangerously-skip-permissions --extra-flag")

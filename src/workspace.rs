@@ -163,21 +163,6 @@ impl Workspace {
     }
 }
 
-/// Returns `true` if a workspace named `workspace_name` already exists under `<repo_root>/.workspaces/<workspace-name>`.
-#[must_use]
-pub fn workspace_exists(repo_root: &Path, workspace_name: &str) -> bool {
-    Workspace::new(repo_root, workspace_name).is_ok_and(|ws| ws.exists())
-}
-
-/// Ensures a workspace named `workspace_name` exists under `<repo_root>/.workspaces/<workspace-name>`.
-/// If it already exists, returns its absolute path.
-/// If not, invokes `jj --no-pager workspace add .workspaces/<workspace-name> --name <workspace-name>`.
-pub fn ensure_workspace(repo_root: &Path, workspace_name: &str) -> Result<PathBuf, WorkspaceError> {
-    let ws = Workspace::new(repo_root, workspace_name)?;
-    ws.ensure()?;
-    Ok(ws.path().to_path_buf())
-}
-
 fn execute_jj_workspace_add(
     repo_root: &Path,
     rel_workspace_path: &Path,
@@ -200,13 +185,6 @@ fn execute_jj_workspace_add(
     }
 
     Ok(())
-}
-
-/// Forgets a workspace named `workspace_name` in Jujutsu by invoking
-/// `jj --no-pager workspace forget <workspace-name>`.
-pub fn forget_workspace(repo_root: &Path, workspace_name: &str) -> Result<(), WorkspaceError> {
-    let ws = Workspace::new(repo_root, workspace_name)?;
-    ws.forget()
 }
 
 fn execute_jj_workspace_forget(
@@ -293,17 +271,21 @@ mod tests {
     }
 
     #[googletest::test]
-    fn ensure_workspace_for_new_name_creates_workspace_and_registers_in_jj() {
+    fn workspace_ensure_creates_workspace_and_registers_in_jj() {
         let dir = tempfile::tempdir().expect("tempdir");
         let repo_root = dir.path();
         init_test_repo(repo_root);
 
         let ws_name = "ws-alpha";
-        let res = ensure_workspace(repo_root, ws_name).expect("ensure_workspace");
+        let ws = Workspace::new(repo_root, ws_name).expect("Workspace::new");
         let expected_path = repo_root.join(".workspaces").join(ws_name);
 
-        expect_that!(res, eq(&expected_path));
-        expect_that!(expected_path.exists(), is_true());
+        expect_that!(ws.path(), eq(&expected_path));
+        expect_that!(ws.exists(), is_false());
+
+        let created = ws.ensure().expect("ensure");
+        expect_that!(created, is_true());
+        expect_that!(ws.exists(), is_true());
         expect_that!(expected_path.join(".jj").exists(), is_true());
 
         let output = std::process::Command::new("jj")
@@ -317,38 +299,41 @@ mod tests {
     }
 
     #[googletest::test]
-    fn ensure_workspace_when_already_exists_succeeds_idempotently() {
+    fn workspace_ensure_when_already_exists_succeeds_idempotently() {
         let dir = tempfile::tempdir().expect("tempdir");
         let repo_root = dir.path();
         init_test_repo(repo_root);
 
         let ws_name = "ws-beta";
-        let path1 = ensure_workspace(repo_root, ws_name).expect("first ensure");
-        let path2 = ensure_workspace(repo_root, ws_name).expect("second ensure");
+        let ws = Workspace::new(repo_root, ws_name).expect("Workspace::new");
+        let created1 = ws.ensure().expect("first ensure");
+        let created2 = ws.ensure().expect("second ensure");
 
-        expect_that!(path1, eq(&path2));
-        expect_that!(path1.join(".jj").exists(), is_true());
+        expect_that!(created1, is_true());
+        expect_that!(created2, is_false());
+        expect_that!(ws.exists(), is_true());
     }
 
     #[googletest::test]
-    fn workspace_exists_checks_workspace_presence() {
+    fn workspace_exists_reflects_presence() {
         let dir = tempfile::tempdir().expect("tempdir");
         let repo_root = dir.path();
         init_test_repo(repo_root);
 
         let ws_name = "ws-check";
-        expect_that!(workspace_exists(repo_root, ws_name), is_false());
+        let ws = Workspace::new(repo_root, ws_name).expect("Workspace::new");
+        expect_that!(ws.exists(), is_false());
 
-        let _ = ensure_workspace(repo_root, ws_name).expect("ensure");
-        expect_that!(workspace_exists(repo_root, ws_name), is_true());
+        ws.ensure().expect("ensure");
+        expect_that!(ws.exists(), is_true());
     }
 
     #[googletest::test]
-    fn ensure_workspace_outside_repo_returns_not_in_jj_repo_error() {
+    fn workspace_new_outside_repo_returns_not_in_jj_repo_error() {
         let dir = tempfile::tempdir().expect("tempdir");
         let non_repo = dir.path();
 
-        let res = ensure_workspace(non_repo, "ws-gamma");
+        let res = Workspace::new(non_repo, "ws-gamma");
         expect_that!(
             res,
             matches_pattern!(Err(matches_pattern!(WorkspaceError::NotInJjRepo)))
@@ -357,12 +342,12 @@ mod tests {
     }
 
     #[googletest::test]
-    fn ensure_workspace_with_empty_name_returns_invalid_workspace_name_error() {
+    fn workspace_new_with_empty_name_returns_invalid_workspace_name_error() {
         let dir = tempfile::tempdir().expect("tempdir");
         let repo_root = dir.path();
         init_test_repo(repo_root);
 
-        let res = ensure_workspace(repo_root, "");
+        let res = Workspace::new(repo_root, "");
         expect_that!(
             res,
             matches_pattern!(Err(matches_pattern!(WorkspaceError::InvalidWorkspaceName(anything()))))
@@ -370,13 +355,13 @@ mod tests {
     }
 
     #[googletest::test]
-    fn ensure_workspace_with_path_traversal_name_returns_invalid_workspace_name_error() {
+    fn workspace_new_with_path_traversal_name_returns_invalid_workspace_name_error() {
         let dir = tempfile::tempdir().expect("tempdir");
         let repo_root = dir.path();
         init_test_repo(repo_root);
 
         for bad_name in [".", "..", "foo/bar", "foo\\bar", "../escape"] {
-            let res = ensure_workspace(repo_root, bad_name);
+            let res = Workspace::new(repo_root, bad_name);
             expect_that!(
                 res,
                 matches_pattern!(Err(matches_pattern!(WorkspaceError::InvalidWorkspaceName(anything()))))
@@ -385,13 +370,14 @@ mod tests {
     }
 
     #[googletest::test]
-    fn forget_workspace_removes_workspace_from_jj() {
+    fn workspace_forget_removes_workspace_from_jj() {
         let dir = tempfile::tempdir().expect("tempdir");
         let repo_root = dir.path();
         init_test_repo(repo_root);
 
         let ws_name = "ws-to-forget";
-        let _ = ensure_workspace(repo_root, ws_name).expect("ensure_workspace");
+        let ws = Workspace::new(repo_root, ws_name).expect("Workspace::new");
+        ws.ensure().expect("ensure");
 
         let before = std::process::Command::new("jj")
             .args(["--no-pager", "workspace", "list"])
@@ -403,7 +389,7 @@ mod tests {
             contains_substring(ws_name)
         );
 
-        forget_workspace(repo_root, ws_name).expect("forget_workspace");
+        ws.forget().expect("forget");
 
         let after = std::process::Command::new("jj")
             .args(["--no-pager", "workspace", "list"])
@@ -414,46 +400,6 @@ mod tests {
             String::from_utf8_lossy(&after.stdout).as_ref(),
             not(contains_substring(ws_name))
         );
-    }
-
-    #[googletest::test]
-    fn forget_workspace_outside_repo_returns_not_in_jj_repo_error() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let non_repo = dir.path();
-
-        let res = forget_workspace(non_repo, "ws-forget");
-        expect_that!(
-            res,
-            matches_pattern!(Err(matches_pattern!(WorkspaceError::NotInJjRepo)))
-        );
-    }
-
-    #[googletest::test]
-    fn forget_workspace_with_empty_name_returns_invalid_workspace_name_error() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let repo_root = dir.path();
-        init_test_repo(repo_root);
-
-        let res = forget_workspace(repo_root, "");
-        expect_that!(
-            res,
-            matches_pattern!(Err(matches_pattern!(WorkspaceError::InvalidWorkspaceName(anything()))))
-        );
-    }
-
-    #[googletest::test]
-    fn forget_workspace_with_path_traversal_name_returns_invalid_workspace_name_error() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let repo_root = dir.path();
-        init_test_repo(repo_root);
-
-        for bad_name in [".", "..", "foo/bar", "foo\\bar", "../escape"] {
-            let res = forget_workspace(repo_root, bad_name);
-            expect_that!(
-                res,
-                matches_pattern!(Err(matches_pattern!(WorkspaceError::InvalidWorkspaceName(anything()))))
-            );
-        }
     }
 
     #[googletest::test]

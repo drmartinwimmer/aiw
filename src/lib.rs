@@ -6,15 +6,8 @@
 pub mod config;
 pub use config::{AiwConfig, ConfigError};
 pub mod workspace;
-pub use workspace::{
-    Workspace, WorkspaceError, ensure_workspace, find_jj_root, forget_workspace, workspace_exists,
-};
+pub use workspace::{Workspace, WorkspaceError, find_jj_root};
 pub mod direnv;
-pub use direnv::{
-    Direnv, allow_direnv, allow_direnv_if_repo_root_allowed, ensure_user_profile_bin_paths,
-    has_envrc, is_direnv_allowed,
-};
+pub use direnv::Direnv;
 pub mod sandbox;
-pub use sandbox::{
-    SandboxBuilder, SandboxConfig, SandboxError, format_command,
-};
+pub use sandbox::{SandboxBuilder, SandboxError};

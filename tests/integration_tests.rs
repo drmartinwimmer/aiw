@@ -198,11 +198,13 @@ fn jj_commands_in_fence_sandbox_execute_successfully_and_persist_commits() {
     init_test_jj_repo(repo_root);
     write_test_fence_json(repo_root);
 
-    let ws_path = aiw::workspace::ensure_workspace(repo_root, "jj-fence-test")
-        .expect("ensure_workspace");
+    let ws = aiw::workspace::Workspace::new(repo_root, "jj-fence-test")
+        .expect("Workspace::new");
+    ws.ensure().expect("ensure workspace");
+    let ws_path = ws.path();
 
     let status_cmd = vec!["jj".into(), "--no-pager".into(), "status".into()];
-    let builder = aiw::sandbox::SandboxBuilder::new(&ws_path, repo_root).command(&status_cmd);
+    let builder = aiw::sandbox::SandboxBuilder::new(ws_path, repo_root, &status_cmd);
     let mut status_cmd = builder.build_command().expect("build_command");
     let status_output = status_cmd.output().expect("execute fence jj status");
 
@@ -221,7 +223,7 @@ fn jj_commands_in_fence_sandbox_execute_successfully_and_persist_commits() {
         "-m".into(),
         "commit from inside fence".into(),
     ];
-    let builder2 = aiw::sandbox::SandboxBuilder::new(&ws_path, repo_root).command(&new_cmd);
+    let builder2 = aiw::sandbox::SandboxBuilder::new(ws_path, repo_root, &new_cmd);
     let mut new_cmd = builder2.build_command().expect("build_command");
     let new_output = new_cmd.output().expect("execute fence jj new");
 
@@ -230,7 +232,7 @@ fn jj_commands_in_fence_sandbox_execute_successfully_and_persist_commits() {
     // Verify change is recorded and visible to host jj
     let log_output = Command::new("jj")
         .args(["--no-pager", "log", "-r", "@", "--ignore-working-copy"])
-        .current_dir(&ws_path)
+        .current_dir(ws_path)
         .output()
         .expect("host jj log");
 
@@ -310,8 +312,9 @@ fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
         .expect("direnv allow on repo root");
     assert!(allow_repo.status.success(), "allow repo root failed");
 
-    let ws_path = aiw::workspace::ensure_workspace(repo_root, "direnv-ws")
-        .expect("ensure_workspace");
+    let ws = aiw::Workspace::new(repo_root, "direnv-ws").expect("Workspace::new");
+    ws.ensure().expect("ensure_workspace");
+    let ws_path = ws.path().to_path_buf();
 
     // Write a .envrc inside the workspace setting an environment variable
     let envrc_path = ws_path.join(".envrc");
@@ -322,7 +325,7 @@ fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
     .expect("write .envrc");
 
     // Allow direnv in workspace for direct SandboxBuilder execution
-    aiw::direnv::allow_direnv(&ws_path);
+    aiw::direnv::Direnv::allow_dir(&ws_path);
 
     let sh_bin = if Path::new("/bin/sh").exists() {
         "/bin/sh"
@@ -334,8 +337,7 @@ fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
         "-c".to_string(),
         "echo CWD=$PWD; echo VAL=$AIW_DIRENV_LOADED".to_string(),
     ];
-    let builder = aiw::sandbox::SandboxBuilder::new(&ws_path, repo_root)
-        .command(&test_cmd)
+    let builder = aiw::sandbox::SandboxBuilder::new(&ws_path, repo_root, &test_cmd)
         .use_direnv(true);
     let mut cmd = builder.build_command().expect("build_command");
     let output = cmd.output().expect("execute sandbox command");
@@ -377,19 +379,22 @@ fn sandbox_does_not_auto_allow_direnv_when_repo_root_is_not_allowed() {
     let repo_envrc = repo_root.join(".envrc");
     std::fs::write(&repo_envrc, "export BLOCKED=1\n").expect("write repo .envrc");
 
-    let ws_path = aiw::workspace::ensure_workspace(repo_root, "unallowed-ws")
-        .expect("ensure_workspace");
+    let ws = aiw::workspace::Workspace::new(repo_root, "unallowed-ws")
+        .expect("Workspace::new");
+    ws.ensure().expect("ensure workspace");
+    let ws_path = ws.path().to_path_buf();
     let ws_envrc = ws_path.join(".envrc");
     std::fs::write(&ws_envrc, "export BLOCKED=1\n").expect("write ws .envrc");
 
     // repo_root is NOT allowed
-    expect_that!(aiw::direnv::is_direnv_allowed(repo_root), is_false());
+    expect_that!(aiw::direnv::Direnv::is_dir_allowed(repo_root), is_false());
 
-    // Call allow_direnv_if_repo_root_allowed
-    aiw::direnv::allow_direnv_if_repo_root_allowed(repo_root, &ws_path);
+    // Call allow_workspace with Direnv
+    let direnv = aiw::direnv::Direnv::new(repo_root);
+    direnv.allow_workspace(&ws_path);
 
     // ws_path should NOT have been allowed!
-    expect_that!(aiw::direnv::is_direnv_allowed(&ws_path), is_false());
+    expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_path), is_false());
 }
 
 #[googletest::test]
@@ -420,7 +425,7 @@ fn direnv_allow_called_on_new_workspace_iff_allowed_in_root() {
         .output()
         .expect("allow root");
     assert!(allow_res.status.success());
-    expect_that!(aiw::direnv::is_direnv_allowed(repo_allowed), is_true());
+    expect_that!(aiw::direnv::Direnv::is_dir_allowed(repo_allowed), is_true());
 
     // Run aiw to create new workspace
     let out_allowed = run_aiw(repo_allowed, &["agy", "new-ws-allowed", "--dry-run"]);
@@ -429,7 +434,7 @@ fn direnv_allow_called_on_new_workspace_iff_allowed_in_root() {
     let ws_allowed = repo_allowed.join(".workspaces").join("new-ws-allowed");
     expect_that!(ws_allowed.join(".envrc").exists(), is_true());
     // direnv allow was called on new workspace because root was allowed:
-    expect_that!(aiw::direnv::is_direnv_allowed(&ws_allowed), is_true());
+    expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_allowed), is_true());
 
     // Case 2: Root is NOT allowed -> new workspace does NOT get auto-allowed
     let dir_unallowed = tempfile::tempdir().expect("tempdir");
@@ -445,7 +450,7 @@ fn direnv_allow_called_on_new_workspace_iff_allowed_in_root() {
         .status()
         .expect("jj commit");
     assert!(status.success());
-    expect_that!(aiw::direnv::is_direnv_allowed(repo_unallowed), is_false());
+    expect_that!(aiw::direnv::Direnv::is_dir_allowed(repo_unallowed), is_false());
 
     // Run aiw to create new workspace in unallowed repo
     let out_unallowed = run_aiw(repo_unallowed, &["agy", "new-ws-unallowed", "--dry-run"]);
@@ -454,7 +459,7 @@ fn direnv_allow_called_on_new_workspace_iff_allowed_in_root() {
     let ws_unallowed = repo_unallowed.join(".workspaces").join("new-ws-unallowed");
     expect_that!(ws_unallowed.join(".envrc").exists(), is_true());
     // direnv allow was NOT called because root was not allowed:
-    expect_that!(aiw::direnv::is_direnv_allowed(&ws_unallowed), is_false());
+    expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_unallowed), is_false());
 }
 
 #[googletest::test]
@@ -484,27 +489,27 @@ fn existing_workspace_does_not_call_direnv_allow() {
         .output()
         .expect("allow root");
     assert!(allow_res.status.success());
-    expect_that!(aiw::direnv::is_direnv_allowed(repo_root), is_true());
+    expect_that!(aiw::direnv::Direnv::is_dir_allowed(repo_root), is_true());
 
     // Create the workspace initially
     let out1 = run_aiw(repo_root, &["agy", "existing-ws", "--dry-run"]);
     assert!(out1.status.success());
 
     let ws_path = repo_root.join(".workspaces").join("existing-ws");
-    expect_that!(aiw::direnv::is_direnv_allowed(&ws_path), is_true());
+    expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_path), is_true());
 
     // Invalidate the workspace allow status by modifying its .envrc
     std::fs::write(ws_path.join(".envrc"), "export ROOT_VAR=ok\nexport MODIFIED=1\n")
         .expect("modify ws .envrc");
     // Verify direnv now considers it unallowed/blocked:
-    expect_that!(aiw::direnv::is_direnv_allowed(&ws_path), is_false());
+    expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_path), is_false());
 
     // Run aiw again on the existing workspace
     let out2 = run_aiw(repo_root, &["agy", "existing-ws", "--dry-run"]);
     assert!(out2.status.success());
 
     // direnv allow must NOT have been called because this is an existing workspace!
-    expect_that!(aiw::direnv::is_direnv_allowed(&ws_path), is_false());
+    expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_path), is_false());
 }
 
 #[googletest::test]
