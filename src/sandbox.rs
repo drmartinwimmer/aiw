@@ -159,15 +159,15 @@ fn ensure_user_profile_bin_paths(cmd: &mut Command) {
     }
 }
 
+fn has_envrc(dir: &Path) -> bool {
+    dir.join(".envrc").exists() || dir.join(".env").exists()
+}
+
 /// Checks if `direnv` is allowed in the specified directory by inspecting `direnv status --json`.
 /// Returns `true` only if `direnv` finds an `.envrc` or `.env` in `dir` and its `allowed` status is 0.
 #[must_use]
 pub fn is_direnv_allowed(dir: &Path) -> bool {
-    if which::which("direnv").is_err() {
-        return false;
-    }
-
-    if !dir.exists() || (!dir.join(".envrc").exists() && !dir.join(".env").exists()) {
+    if !has_envrc(dir) {
         return false;
     }
 
@@ -176,10 +176,12 @@ pub fn is_direnv_allowed(dir: &Path) -> bool {
     cmd.current_dir(dir);
     ensure_user_profile_bin_paths(&mut cmd);
 
-    let output = match cmd.output() {
-        Ok(out) if out.status.success() => out,
-        _ => return false,
+    let Ok(output) = cmd.output() else {
+        return false;
     };
+    if !output.status.success() {
+        return false;
+    }
 
     #[derive(serde::Deserialize)]
     struct DirenvStatus {
@@ -197,36 +199,21 @@ pub fn is_direnv_allowed(dir: &Path) -> bool {
         allowed: i32,
     }
 
-    let parsed: DirenvStatus = match serde_json::from_slice(&output.stdout) {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-
-    parsed
-        .state
+    serde_json::from_slice::<DirenvStatus>(&output.stdout)
+        .ok()
+        .and_then(|s| s.state)
         .and_then(|s| s.found_rc)
         .is_some_and(|rc| rc.allowed == 0)
 }
 
-/// If direnv is present on PATH, the workspace directory contains `.envrc` or `.env`,
-/// and the repository root directory is allowed by direnv, runs `direnv allow` on the workspace
-/// directory so direnv does not block execution.
+/// If the workspace directory contains `.envrc` or `.env`, and the repository root directory
+/// is allowed by direnv, runs `direnv allow` on the workspace directory so direnv does not block execution.
 pub fn allow_direnv_if_repo_root_allowed(repo_root: &Path, workspace_path: &Path) {
-    if which::which("direnv").is_err() {
-        return;
-    }
-    if !workspace_path.join(".envrc").exists() && !workspace_path.join(".env").exists() {
-        return;
-    }
-    if !is_direnv_allowed(repo_root) {
-        return;
-    }
-
-    let mut cmd = Command::new("direnv");
-    cmd.args(["allow"]).arg(workspace_path);
-    ensure_user_profile_bin_paths(&mut cmd);
-    match cmd.output() {
-        Ok(_) | Err(_) => {}
+    if has_envrc(workspace_path) && is_direnv_allowed(repo_root) {
+        let mut cmd = Command::new("direnv");
+        cmd.args(["allow"]).arg(workspace_path);
+        ensure_user_profile_bin_paths(&mut cmd);
+        drop(cmd.output());
     }
 }
 

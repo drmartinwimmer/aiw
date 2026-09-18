@@ -65,9 +65,6 @@ impl AgyCommand {
         }
 
         let use_direnv = which::which("direnv").is_ok();
-        if use_direnv {
-            aiw::sandbox::allow_direnv_if_repo_root_allowed(&repo_root, &workspace_path);
-        }
 
         let sandbox_config = aiw::sandbox::SandboxConfig {
             repo_root: &repo_root,
