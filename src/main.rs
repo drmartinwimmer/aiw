@@ -83,7 +83,7 @@ impl AgyCommand {
 
         let payload = self.build_payload_command();
         let builder = aiw::sandbox::SandboxBuilder::for_workspace(&workspace, &payload)
-            .use_direnv(direnv.is_allowed());
+            .with_direnv(direnv.is_allowed());
 
         if self.dry_run {
             println!("{builder}");

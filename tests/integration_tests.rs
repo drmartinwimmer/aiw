@@ -338,7 +338,7 @@ fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
         "echo CWD=$PWD; echo VAL=$AIW_DIRENV_LOADED".to_string(),
     ];
     let builder = aiw::sandbox::SandboxBuilder::new(&ws_path, repo_root, &test_cmd)
-        .use_direnv(true);
+        .with_direnv(true);
     let mut cmd = builder.build_command().expect("build_command");
     let output = cmd.output().expect("execute sandbox command");
 
