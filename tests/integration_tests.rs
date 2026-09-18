@@ -273,7 +273,7 @@ fn forget_subcommand_removes_workspace_from_jj_list() {
     let forget_output = run_aiw(repo_root, &["forget", "ws-to-forget"]);
     expect_that!(forget_output.status.success(), is_true());
 
-    // Verify jj no longer lists the workspace
+    // Verify jj no longer lists the workspace and directory was removed from disk
     let list_after = Command::new("jj")
         .args(["--no-pager", "workspace", "list"])
         .current_dir(repo_root)
@@ -283,6 +283,54 @@ fn forget_subcommand_removes_workspace_from_jj_list() {
         String::from_utf8_lossy(&list_after.stdout).as_ref(),
         not(contains_substring("ws-to-forget"))
     );
+    expect_that!(repo_root.join(".workspaces").join("ws-to-forget").exists(), is_false());
+}
+
+#[googletest::test]
+fn recreating_forgotten_workspace_calls_direnv_allow() {
+    if which::which("direnv").is_err() {
+        eprintln!("Skipping recreating_forgotten_workspace_calls_direnv_allow: direnv not found");
+        return;
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repo_root = dir.path();
+    init_test_jj_repo(repo_root);
+    write_test_fence_json(repo_root);
+
+    let root_envrc = repo_root.join(".envrc");
+    std::fs::write(&root_envrc, "export ROOT_VAR=ok\n").expect("write root .envrc");
+    let status = Command::new("jj")
+        .args(["--no-pager", "commit", "-m", "initial"])
+        .current_dir(repo_root)
+        .status()
+        .expect("jj commit");
+    assert!(status.success());
+
+    let allow_res = Command::new("direnv")
+        .args(["allow"])
+        .current_dir(repo_root)
+        .output()
+        .expect("allow root");
+    assert!(allow_res.status.success());
+
+    // 1. Initial creation
+    let out1 = run_aiw(repo_root, &["agy", "recreated-ws", "--dry-run"]);
+    assert!(out1.status.success());
+    let ws_path = repo_root.join(".workspaces").join("recreated-ws");
+    expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_path), is_true());
+
+    // 2. Forget workspace
+    let forget_out = run_aiw(repo_root, &["forget", "recreated-ws"]);
+    assert!(forget_out.status.success());
+    expect_that!(ws_path.exists(), is_false());
+
+    // 3. Re-create workspace with aiw
+    let out2 = run_aiw(repo_root, &["agy", "recreated-ws", "--dry-run"]);
+    assert!(out2.status.success());
+
+    // 4. Must have called direnv allow again because it's a re-created new workspace!
+    expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_path), is_true());
 }
 
 #[googletest::test]

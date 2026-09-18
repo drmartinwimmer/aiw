@@ -144,8 +144,14 @@ impl Workspace {
     ///
     /// Returns `Ok(true)` if the workspace was newly created, or `Ok(false)` if it already existed.
     pub fn ensure(&self) -> Result<bool, WorkspaceError> {
-        if self.exists() {
+        let is_registered = execute_jj_workspace_is_registered(&self.repo_root, &self.name)?;
+        if is_registered && self.exists() {
             return Ok(false);
+        }
+
+        // Clean up any stale/forgotten directory on disk before adding
+        if self.path.exists() {
+            std::fs::remove_dir_all(&self.path)?;
         }
 
         let workspaces_dir = self.repo_root.join(".workspaces");
@@ -157,10 +163,41 @@ impl Workspace {
         Ok(true)
     }
 
-    /// Forgets the workspace in Jujutsu by invoking `jj --no-pager workspace forget <workspace-name>`.
+    /// Forgets the workspace in Jujutsu by invoking `jj --no-pager workspace forget <workspace-name>`,
+    /// and removes the workspace directory from disk.
     pub fn forget(&self) -> Result<(), WorkspaceError> {
-        execute_jj_workspace_forget(&self.repo_root, &self.name)
+        execute_jj_workspace_forget(&self.repo_root, &self.name)?;
+        if self.path.exists() {
+            std::fs::remove_dir_all(&self.path)?;
+        }
+        Ok(())
     }
+}
+
+fn execute_jj_workspace_is_registered(
+    repo_root: &Path,
+    workspace_name: &str,
+) -> Result<bool, WorkspaceError> {
+    let output = std::process::Command::new("jj")
+        .args(["--no-pager", "workspace", "list"])
+        .current_dir(repo_root)
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr_lower = stderr.to_lowercase();
+        if stderr_lower.contains("no jj repo") || stderr_lower.contains("there is no jj repo") {
+            return Err(WorkspaceError::NotInJjRepo);
+        }
+        return Err(WorkspaceError::JjCommandFailed(stderr.trim().to_string()));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout.lines().any(|line| {
+        line.split_once(':')
+            .map(|(name, _)| name.trim() == workspace_name)
+            .unwrap_or(false)
+    }))
 }
 
 fn execute_jj_workspace_add(
@@ -432,6 +469,7 @@ mod tests {
 
         // Forget workspace
         ws.forget().expect("forget workspace");
+        expect_that!(ws.path().exists(), is_false());
         let list_output = std::process::Command::new("jj")
             .args(["--no-pager", "workspace", "list"])
             .current_dir(repo_root)
@@ -441,5 +479,25 @@ mod tests {
             String::from_utf8_lossy(&list_output.stdout).as_ref(),
             not(contains_substring("struct-ws"))
         );
+    }
+
+    #[googletest::test]
+    fn workspace_ensure_after_forget_recreates_and_returns_true() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = dir.path();
+        init_test_repo(repo_root);
+
+        let ws = Workspace::new(repo_root, "recreate-ws").expect("Workspace::new");
+        let first_ensure = ws.ensure().expect("first ensure");
+        expect_that!(first_ensure, is_true());
+        expect_that!(ws.path().exists(), is_true());
+
+        ws.forget().expect("forget");
+        expect_that!(ws.path().exists(), is_false());
+
+        // Re-creating the forgotten workspace must return Ok(true)
+        let second_ensure = ws.ensure().expect("second ensure");
+        expect_that!(second_ensure, is_true());
+        expect_that!(ws.path().exists(), is_true());
     }
 }
