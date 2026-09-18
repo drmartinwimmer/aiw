@@ -75,6 +75,23 @@ fn validate_workspace_name(workspace_name: &str) -> Result<(), WorkspaceError> {
     Ok(())
 }
 
+/// Returns `true` if a workspace named `workspace_name` already exists under `<repo_root>/.workspaces/<workspace-name>`.
+#[must_use]
+pub fn workspace_exists(repo_root: &Path, workspace_name: &str) -> bool {
+    let abs_repo_root = if repo_root.is_absolute() {
+        repo_root.to_path_buf()
+    } else if let Ok(cwd) = std::env::current_dir() {
+        cwd.join(repo_root)
+    } else {
+        repo_root.to_path_buf()
+    };
+    abs_repo_root
+        .join(".workspaces")
+        .join(workspace_name)
+        .join(".jj")
+        .exists()
+}
+
 /// Ensures a workspace named `workspace_name` exists under `<repo_root>/.workspaces/<workspace-name>`.
 /// If it already exists, returns its absolute path.
 /// If not, invokes `jj --no-pager workspace add .workspaces/<workspace-name> --name <workspace-name>`.
@@ -266,6 +283,19 @@ mod tests {
 
         expect_that!(path1, eq(&path2));
         expect_that!(path1.join(".jj").exists(), is_true());
+    }
+
+    #[googletest::test]
+    fn workspace_exists_checks_workspace_presence() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = dir.path();
+        init_test_repo(repo_root);
+
+        let ws_name = "ws-check";
+        expect_that!(workspace_exists(repo_root, ws_name), is_false());
+
+        let _ = ensure_workspace(repo_root, ws_name).expect("ensure");
+        expect_that!(workspace_exists(repo_root, ws_name), is_true());
     }
 
     #[googletest::test]

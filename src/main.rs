@@ -58,13 +58,19 @@ impl AgyCommand {
     fn run(&self) -> Result<ExitCode, AppError> {
         let current_dir = std::env::current_dir()?;
         let repo_root = aiw::workspace::find_jj_root(&current_dir)?;
-        let workspace_path = aiw::workspace::ensure_workspace(&repo_root, &self.workspace_name)?;
 
         if repo_root.join("aiw.json").exists() {
             let _ = aiw::config::AiwConfig::find_and_load(&repo_root)?;
         }
 
-        let use_direnv = which::which("direnv").is_ok();
+        let use_direnv = aiw::sandbox::is_direnv_allowed(&repo_root);
+
+        let is_new_workspace = !aiw::workspace::workspace_exists(&repo_root, &self.workspace_name);
+        let workspace_path = aiw::workspace::ensure_workspace(&repo_root, &self.workspace_name)?;
+
+        if is_new_workspace && use_direnv {
+            aiw::sandbox::allow_direnv(&workspace_path);
+        }
 
         let sandbox_config = aiw::sandbox::SandboxConfig {
             repo_root: &repo_root,

@@ -96,13 +96,18 @@ impl<'a> SandboxBuilder<'a> {
 
     /// Builds the std::process::Command prepared to execute fence.
     pub fn build_command(&self) -> Result<Command, SandboxError> {
-        if self.config.use_direnv {
-            allow_direnv_if_repo_root_allowed(self.config.repo_root, self.config.workspace_path);
-        }
-
         let args = self.build_args()?;
-        let mut cmd = Command::new("fence");
+        let (prog, prefix) = if is_nscd_mount_broken() {
+            (
+                "bwrap",
+                vec!["--dev-bind", "/", "/", "--tmpfs", "/var/run", "fence"],
+            )
+        } else {
+            ("fence", vec![])
+        };
+        let mut cmd = Command::new(prog);
         cmd.current_dir(self.config.workspace_path);
+        cmd.args(prefix);
         cmd.args(args);
 
         ensure_user_profile_bin_paths(&mut cmd);
@@ -125,6 +130,20 @@ impl<'a> SandboxBuilder<'a> {
             .stderr(std::process::Stdio::inherit());
         let status = cmd.status()?;
         Ok(status)
+    }
+}
+
+fn is_nscd_mount_broken() -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata("/var/run/nscd")
+            .map(|m| m.nlink() == 0)
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        false
     }
 }
 
@@ -206,14 +225,21 @@ pub fn is_direnv_allowed(dir: &Path) -> bool {
         .is_some_and(|rc| rc.allowed == 0)
 }
 
+/// If the directory contains `.envrc` or `.env`, runs `direnv allow` on that directory.
+pub fn allow_direnv(dir: &Path) {
+    if has_envrc(dir) {
+        let mut cmd = Command::new("direnv");
+        cmd.args(["allow"]).arg(dir);
+        ensure_user_profile_bin_paths(&mut cmd);
+        drop(cmd.output());
+    }
+}
+
 /// If the workspace directory contains `.envrc` or `.env`, and the repository root directory
 /// is allowed by direnv, runs `direnv allow` on the workspace directory so direnv does not block execution.
 pub fn allow_direnv_if_repo_root_allowed(repo_root: &Path, workspace_path: &Path) {
-    if has_envrc(workspace_path) && is_direnv_allowed(repo_root) {
-        let mut cmd = Command::new("direnv");
-        cmd.args(["allow"]).arg(workspace_path);
-        ensure_user_profile_bin_paths(&mut cmd);
-        drop(cmd.output());
+    if is_direnv_allowed(repo_root) {
+        allow_direnv(workspace_path);
     }
 }
 
@@ -506,7 +532,12 @@ mod tests {
         let builder = SandboxBuilder::new(config);
         let cmd = builder.build_command().expect("build_command");
 
-        expect_that!(cmd.get_program(), eq("fence"));
+        let expected_prog = if is_nscd_mount_broken() {
+            "bwrap"
+        } else {
+            "fence"
+        };
+        expect_that!(cmd.get_program(), eq(expected_prog));
         expect_that!(cmd.get_current_dir(), some(eq(&workspace_path)));
     }
 
