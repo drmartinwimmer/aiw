@@ -35,7 +35,8 @@ impl ForgetCommand {
     fn run(&self) -> Result<ExitCode, AppError> {
         let current_dir = std::env::current_dir()?;
         let repo_root = aiw::workspace::find_jj_root(&current_dir)?;
-        aiw::workspace::forget_workspace(&repo_root, &self.workspace_name)?;
+        let workspace = aiw::workspace::Workspace::new(&repo_root, &self.workspace_name)?;
+        workspace.forget()?;
         Ok(ExitCode::SUCCESS)
     }
 }
@@ -63,29 +64,21 @@ impl AgyCommand {
             let _ = aiw::config::AiwConfig::find_and_load(&repo_root)?;
         }
 
-        let use_direnv = aiw::sandbox::is_direnv_allowed(&repo_root);
+        let direnv = aiw::direnv::Direnv::new(&repo_root);
+        let workspace = aiw::workspace::Workspace::new(&repo_root, &self.workspace_name)?;
+        let is_new_workspace = workspace.ensure()?;
 
-        let is_new_workspace = !aiw::workspace::workspace_exists(&repo_root, &self.workspace_name);
-        let workspace_path = aiw::workspace::ensure_workspace(&repo_root, &self.workspace_name)?;
-
-        if is_new_workspace && use_direnv {
-            aiw::sandbox::allow_direnv(&workspace_path);
+        if is_new_workspace {
+            direnv.allow_workspace(workspace.path());
         }
 
-        let sandbox_config = aiw::sandbox::SandboxConfig {
-            repo_root: &repo_root,
-            workspace_path: &workspace_path,
-            command: None,
-            extra_args: &self.extra_args,
-            settings_path: None,
-            use_direnv,
-        };
-
-        let builder = aiw::sandbox::SandboxBuilder::new(sandbox_config);
+        let builder = aiw::sandbox::SandboxBuilder::for_workspace(&workspace)
+            .extra_args(&self.extra_args)
+            .use_direnv(direnv.is_allowed());
 
         if self.dry_run {
-            let args = builder.build_args()?;
-            println!("fence {}", args.join(" "));
+            let cmd = builder.build_command()?;
+            println!("{}", aiw::sandbox::format_command(&cmd));
             Ok(ExitCode::SUCCESS)
         } else {
             let status = builder.run()?;

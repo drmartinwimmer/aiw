@@ -75,51 +75,107 @@ fn validate_workspace_name(workspace_name: &str) -> Result<(), WorkspaceError> {
     Ok(())
 }
 
+/// Encapsulates state and operations for a Jujutsu workspace under `<repo_root>/.workspaces/<name>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Workspace {
+    repo_root: PathBuf,
+    name: String,
+    path: PathBuf,
+}
+
+impl Workspace {
+    /// Creates a new `Workspace` instance for a given repository root and workspace name.
+    ///
+    /// Validates that the name is valid and that `repo_root` points inside a Jujutsu repository.
+    pub fn new(repo_root: &Path, name: &str) -> Result<Self, WorkspaceError> {
+        validate_workspace_name(name)?;
+
+        let abs_repo_root = if repo_root.is_absolute() {
+            repo_root.to_path_buf()
+        } else if let Ok(cwd) = std::env::current_dir() {
+            cwd.join(repo_root)
+        } else {
+            repo_root.to_path_buf()
+        };
+
+        if !abs_repo_root.join(".jj").exists() {
+            return Err(WorkspaceError::NotInJjRepo);
+        }
+
+        let path = abs_repo_root.join(".workspaces").join(name);
+        Ok(Self {
+            repo_root: abs_repo_root,
+            name: name.to_string(),
+            path,
+        })
+    }
+
+    /// Discovers the Jujutsu repository root enclosing `dir` and returns a `Workspace` handle.
+    pub fn from_dir(dir: &Path, name: &str) -> Result<Self, WorkspaceError> {
+        let repo_root = find_jj_root(dir)?;
+        Self::new(&repo_root, name)
+    }
+
+    /// Returns the workspace name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the workspace directory path.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Returns the enclosing repository root path.
+    #[must_use]
+    pub fn repo_root(&self) -> &Path {
+        &self.repo_root
+    }
+
+    /// Returns `true` if the workspace currently exists on disk and contains a `.jj` directory.
+    #[must_use]
+    pub fn exists(&self) -> bool {
+        self.path.join(".jj").exists()
+    }
+
+    /// Ensures the workspace exists on disk and is registered in Jujutsu.
+    ///
+    /// Returns `Ok(true)` if the workspace was newly created, or `Ok(false)` if it already existed.
+    pub fn ensure(&self) -> Result<bool, WorkspaceError> {
+        if self.exists() {
+            return Ok(false);
+        }
+
+        let workspaces_dir = self.repo_root.join(".workspaces");
+        std::fs::create_dir_all(&workspaces_dir)?;
+
+        let rel_workspace_path = Path::new(".workspaces").join(&self.name);
+        execute_jj_workspace_add(&self.repo_root, &rel_workspace_path, &self.name)?;
+
+        Ok(true)
+    }
+
+    /// Forgets the workspace in Jujutsu by invoking `jj --no-pager workspace forget <workspace-name>`.
+    pub fn forget(&self) -> Result<(), WorkspaceError> {
+        execute_jj_workspace_forget(&self.repo_root, &self.name)
+    }
+}
+
 /// Returns `true` if a workspace named `workspace_name` already exists under `<repo_root>/.workspaces/<workspace-name>`.
 #[must_use]
 pub fn workspace_exists(repo_root: &Path, workspace_name: &str) -> bool {
-    let abs_repo_root = if repo_root.is_absolute() {
-        repo_root.to_path_buf()
-    } else if let Ok(cwd) = std::env::current_dir() {
-        cwd.join(repo_root)
-    } else {
-        repo_root.to_path_buf()
-    };
-    abs_repo_root
-        .join(".workspaces")
-        .join(workspace_name)
-        .join(".jj")
-        .exists()
+    Workspace::new(repo_root, workspace_name).is_ok_and(|ws| ws.exists())
 }
 
 /// Ensures a workspace named `workspace_name` exists under `<repo_root>/.workspaces/<workspace-name>`.
 /// If it already exists, returns its absolute path.
 /// If not, invokes `jj --no-pager workspace add .workspaces/<workspace-name> --name <workspace-name>`.
 pub fn ensure_workspace(repo_root: &Path, workspace_name: &str) -> Result<PathBuf, WorkspaceError> {
-    validate_workspace_name(workspace_name)?;
-
-    let abs_repo_root = if repo_root.is_absolute() {
-        repo_root.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(repo_root)
-    };
-
-    if !abs_repo_root.join(".jj").exists() {
-        return Err(WorkspaceError::NotInJjRepo);
-    }
-
-    let workspace_path = abs_repo_root.join(".workspaces").join(workspace_name);
-    if workspace_path.join(".jj").exists() {
-        return Ok(workspace_path);
-    }
-
-    let workspaces_dir = abs_repo_root.join(".workspaces");
-    std::fs::create_dir_all(&workspaces_dir)?;
-
-    let rel_workspace_path = Path::new(".workspaces").join(workspace_name);
-    execute_jj_workspace_add(&abs_repo_root, &rel_workspace_path, workspace_name)?;
-
-    Ok(workspace_path)
+    let ws = Workspace::new(repo_root, workspace_name)?;
+    ws.ensure()?;
+    Ok(ws.path().to_path_buf())
 }
 
 fn execute_jj_workspace_add(
@@ -149,19 +205,8 @@ fn execute_jj_workspace_add(
 /// Forgets a workspace named `workspace_name` in Jujutsu by invoking
 /// `jj --no-pager workspace forget <workspace-name>`.
 pub fn forget_workspace(repo_root: &Path, workspace_name: &str) -> Result<(), WorkspaceError> {
-    validate_workspace_name(workspace_name)?;
-
-    let abs_repo_root = if repo_root.is_absolute() {
-        repo_root.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(repo_root)
-    };
-
-    if !abs_repo_root.join(".jj").exists() {
-        return Err(WorkspaceError::NotInJjRepo);
-    }
-
-    execute_jj_workspace_forget(&abs_repo_root, workspace_name)
+    let ws = Workspace::new(repo_root, workspace_name)?;
+    ws.forget()
 }
 
 fn execute_jj_workspace_forget(
@@ -409,5 +454,46 @@ mod tests {
                 matches_pattern!(Err(matches_pattern!(WorkspaceError::InvalidWorkspaceName(anything()))))
             );
         }
+    }
+
+    #[googletest::test]
+    fn workspace_struct_lifecycle_and_methods() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = dir.path();
+        init_test_repo(repo_root);
+
+        let ws = Workspace::new(repo_root, "struct-ws").expect("new Workspace");
+        expect_that!(ws.name(), eq("struct-ws"));
+        expect_that!(ws.repo_root(), eq(repo_root));
+        expect_that!(ws.path(), eq(&repo_root.join(".workspaces").join("struct-ws")));
+        expect_that!(ws.exists(), is_false());
+
+        // First ensure returns Ok(true) indicating newly created
+        let is_new = ws.ensure().expect("ensure workspace");
+        expect_that!(is_new, is_true());
+        expect_that!(ws.exists(), is_true());
+
+        // Second ensure returns Ok(false) indicating already existed
+        let is_new_again = ws.ensure().expect("ensure workspace again");
+        expect_that!(is_new_again, is_false());
+
+        // Test from_dir
+        let sub = repo_root.join("subdir");
+        std::fs::create_dir_all(&sub).expect("create_dir_all");
+        let ws_from_sub = Workspace::from_dir(&sub, "from-sub").expect("from_dir");
+        expect_that!(ws_from_sub.repo_root(), eq(repo_root));
+        expect_that!(ws_from_sub.name(), eq("from-sub"));
+
+        // Forget workspace
+        ws.forget().expect("forget workspace");
+        let list_output = std::process::Command::new("jj")
+            .args(["--no-pager", "workspace", "list"])
+            .current_dir(repo_root)
+            .output()
+            .expect("jj workspace list");
+        expect_that!(
+            String::from_utf8_lossy(&list_output.stdout).as_ref(),
+            not(contains_substring("struct-ws"))
+        );
     }
 }
