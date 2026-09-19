@@ -27,19 +27,19 @@ pub enum HerdrError {
 
 /// Represents the result of creating a new Herdr tab.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CreatedTab {
-    pub tab_id: String,
-    pub root_pane_id: String,
-    pub label: String,
-    pub workspace_id: Option<String>,
+pub(crate) struct CreatedTab {
+    pub(crate) tab_id: String,
+    pub(crate) root_pane_id: String,
+    pub(crate) label: String,
+    pub(crate) workspace_id: Option<String>,
 }
 
 /// Represents information about an existing Herdr tab.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TabInfo {
-    pub tab_id: String,
-    pub label: Option<String>,
-    pub workspace_id: Option<String>,
+pub(crate) struct TabInfo {
+    pub(crate) tab_id: String,
+    pub(crate) label: Option<String>,
+    pub(crate) workspace_id: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -100,104 +100,35 @@ pub struct Herdr {
 impl Herdr {
     /// Returns `true` if `aiw` is currently running inside a Herdr-managed pane (`HERDR_ENV=1`).
     #[must_use]
-    pub fn is_inside_herdr() -> bool {
+    pub(crate) fn is_inside_herdr() -> bool {
         std::env::var("HERDR_ENV").is_ok_and(|val| val == "1")
     }
 
-    /// Detects if `aiw` is running inside Herdr.
-    /// Returns `Some(Herdr)` if running inside Herdr, or `None` otherwise.
+    /// Constructs a `Herdr` instance using configuration and identifiers from the environment.
+    /// Returns `None` if `aiw` is not running inside a Herdr environment (`HERDR_ENV != "1"`).
     #[must_use]
-    pub fn detect() -> Option<Self> {
+    pub fn from_env() -> Option<Self> {
         if !Self::is_inside_herdr() {
             return None;
         }
-        Some(Self::from_env())
-    }
 
-    /// Constructs a `Herdr` instance using configuration and identifiers from the environment.
-    #[must_use]
-    pub fn from_env() -> Self {
         let binary = std::env::var_os("HERDR_BIN_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("herdr"));
 
-        Self {
+        Some(Self {
             binary,
             workspace_id: std::env::var("HERDR_WORKSPACE_ID").ok(),
             tab_id: std::env::var("HERDR_TAB_ID").ok(),
             pane_id: std::env::var("HERDR_PANE_ID").ok(),
             socket_path: std::env::var_os("HERDR_SOCKET_PATH").map(PathBuf::from),
-        }
-    }
-
-    /// Creates a new `Herdr` instance with a specific binary path.
-    #[must_use]
-    pub fn new(binary: PathBuf) -> Self {
-        Self {
-            binary,
-            workspace_id: None,
-            tab_id: None,
-            pane_id: None,
-            socket_path: None,
-        }
-    }
-
-    /// Returns a new `Herdr` instance configured with the specified binary path.
-    #[must_use]
-    pub fn with_binary(mut self, binary: PathBuf) -> Self {
-        self.binary = binary;
-        self
-    }
-
-    /// Returns a new `Herdr` instance configured with the specified caller tab ID.
-    #[must_use]
-    pub fn with_tab_id(mut self, tab_id: impl Into<String>) -> Self {
-        self.tab_id = Some(tab_id.into());
-        self
-    }
-
-    /// Returns a new `Herdr` instance configured with the specified caller pane ID.
-    #[must_use]
-    pub fn with_pane_id(mut self, pane_id: impl Into<String>) -> Self {
-        self.pane_id = Some(pane_id.into());
-        self
-    }
-
-    /// Returns a new `Herdr` instance configured with the specified caller workspace ID.
-    #[must_use]
-    pub fn with_workspace_id(mut self, workspace_id: impl Into<String>) -> Self {
-        self.workspace_id = Some(workspace_id.into());
-        self
-    }
-
-    /// Path to the Herdr binary executable.
-    #[must_use]
-    pub fn binary(&self) -> &Path {
-        &self.binary
-    }
-
-    /// Caller workspace ID, if known.
-    #[must_use]
-    pub fn workspace_id(&self) -> Option<&str> {
-        self.workspace_id.as_deref()
-    }
-
-    /// Caller tab ID, if known.
-    #[must_use]
-    pub fn tab_id(&self) -> Option<&str> {
-        self.tab_id.as_deref()
+        })
     }
 
     /// Caller pane ID, if known.
     #[must_use]
-    pub fn pane_id(&self) -> Option<&str> {
+    pub(crate) fn pane_id(&self) -> Option<&str> {
         self.pane_id.as_deref()
-    }
-
-    /// Path to the Herdr unix socket, if known.
-    #[must_use]
-    pub fn socket_path(&self) -> Option<&Path> {
-        self.socket_path.as_deref()
     }
 
     fn execute_cmd(&self, args: &[&str]) -> Result<String, HerdrError> {
@@ -235,7 +166,7 @@ impl Herdr {
     }
 
     /// Fetches information about a specific tab by tab ID.
-    pub fn get_tab(&self, tab_id: &str) -> Result<TabInfo, HerdrError> {
+    pub(crate) fn get_tab(&self, tab_id: &str) -> Result<TabInfo, HerdrError> {
         let stdout = self.execute_cmd(&["tab", "get", tab_id])?;
         let resp: HerdrTabGetResponse = serde_json::from_str(&stdout)?;
 
@@ -256,7 +187,7 @@ impl Herdr {
     }
 
     /// Fetches information about the current caller tab (`HERDR_TAB_ID`).
-    pub fn current_tab(&self) -> Result<TabInfo, HerdrError> {
+    pub(crate) fn current_tab(&self) -> Result<TabInfo, HerdrError> {
         let tab_id = self
             .tab_id
             .as_deref()
@@ -265,13 +196,13 @@ impl Herdr {
     }
 
     /// Returns the label of the current tab, if available.
-    pub fn current_tab_label(&self) -> Result<Option<String>, HerdrError> {
+    pub(crate) fn current_tab_label(&self) -> Result<Option<String>, HerdrError> {
         Ok(self.current_tab()?.label)
     }
 
     /// Returns `true` if the current tab's label matches `expected_name`.
     #[must_use]
-    pub fn is_current_tab_named(&self, expected_name: &str) -> bool {
+    pub(crate) fn is_current_tab_named(&self, expected_name: &str) -> bool {
         self.current_tab_label()
             .ok()
             .flatten()
@@ -279,7 +210,7 @@ impl Herdr {
     }
 
     /// Creates a new tab with the specified label, optional working directory, and focus setting.
-    pub fn create_tab(
+    pub(crate) fn create_tab(
         &self,
         label: &str,
         cwd: Option<&Path>,
@@ -329,14 +260,8 @@ impl Herdr {
         })
     }
 
-    /// Closes the specified tab in Herdr.
-    pub fn close_tab(&self, tab_id: &str) -> Result<(), HerdrError> {
-        self.execute_cmd(&["tab", "close", tab_id])?;
-        Ok(())
-    }
-
     /// Reports agent lifecycle state to Herdr for the given pane.
-    pub fn report_agent(&self, pane_id: &str, agent: &str, state: &str) -> Result<(), HerdrError> {
+    pub(crate) fn report_agent(&self, pane_id: &str, agent: &str, state: &str) -> Result<(), HerdrError> {
         self.execute_cmd(&[
             "pane",
             "report-agent",
@@ -352,19 +277,19 @@ impl Herdr {
     }
 
     /// Informs Herdr that the specified agent is running in the given pane.
-    pub fn inform_agent(&self, pane_id: &str, agent: &str) -> Result<(), HerdrError> {
+    pub(crate) fn inform_agent(&self, pane_id: &str, agent: &str) -> Result<(), HerdrError> {
         self.report_agent(pane_id, agent, "working")
     }
 
     /// Executes a command in the specified pane via `herdr pane run`.
-    pub fn execute_in_pane(&self, pane_id: &str, command: &str) -> Result<(), HerdrError> {
+    pub(crate) fn execute_in_pane(&self, pane_id: &str, command: &str) -> Result<(), HerdrError> {
         self.execute_cmd(&["pane", "run", pane_id, command])?;
         Ok(())
     }
 
     /// Creates a tab named after `workspace_name`, informs Herdr about the agent being run,
     /// and executes `command` in the newly created tab.
-    pub fn open_workspace_tab_and_execute(
+    pub(crate) fn open_workspace_tab_and_execute(
         &self,
         workspace_name: &str,
         command: &str,
@@ -379,6 +304,96 @@ impl Herdr {
 
         self.execute_in_pane(&tab.root_pane_id, command)?;
         Ok(tab)
+    }
+
+    fn execute_in_place(&self, command: &str, cwd: Option<&Path>) -> Result<(), HerdrError> {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", command]);
+        if let Some(dir) = cwd {
+            cmd.current_dir(dir);
+        }
+        cmd.stdin(std::process::Stdio::inherit())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit());
+        crate::direnv::ensure_user_profile_bin_paths(&mut cmd);
+
+        let status = cmd.status()?;
+        if !status.success() {
+            return Err(HerdrError::CommandFailed {
+                command: command.to_string(),
+                code: status.code(),
+                stderr: String::new(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Takes a command, decides how to run it based on Herdr context, and executes it.
+    ///
+    /// - If currently inside a tab named after `workspace_name`: informs Herdr about the agent on the current pane and executes the command in place.
+    /// - If not inside the workspace tab: creates a new tab named after `workspace_name`, informs Herdr about the agent, and executes the command in that tab.
+    pub fn run_command(
+        &self,
+        workspace_name: &str,
+        command: &str,
+        agent: &str,
+        cwd: Option<&Path>,
+    ) -> Result<(), HerdrError> {
+        if self.is_current_tab_named(workspace_name) {
+            if let Some(pane_id) = self.pane_id()
+                && let Err(err) = self.inform_agent(pane_id, agent)
+            {
+                eprintln!("Warning: failed to inform Herdr about agent: {err}");
+            }
+            self.execute_in_place(command, cwd)
+        } else {
+            self.open_workspace_tab_and_execute(workspace_name, command, agent, cwd)?;
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+impl Herdr {
+    pub(crate) fn new(binary: PathBuf) -> Self {
+        Self {
+            binary,
+            workspace_id: None,
+            tab_id: None,
+            pane_id: None,
+            socket_path: None,
+        }
+    }
+
+    pub(crate) fn with_tab_id(mut self, tab_id: impl Into<String>) -> Self {
+        self.tab_id = Some(tab_id.into());
+        self
+    }
+
+    pub(crate) fn with_pane_id(mut self, pane_id: impl Into<String>) -> Self {
+        self.pane_id = Some(pane_id.into());
+        self
+    }
+
+    pub(crate) fn with_workspace_id(mut self, workspace_id: impl Into<String>) -> Self {
+        self.workspace_id = Some(workspace_id.into());
+        self
+    }
+
+    pub(crate) fn binary(&self) -> &Path {
+        &self.binary
+    }
+
+    pub(crate) fn workspace_id(&self) -> Option<&str> {
+        self.workspace_id.as_deref()
+    }
+
+    pub(crate) fn tab_id(&self) -> Option<&str> {
+        self.tab_id.as_deref()
+    }
+
+    pub(crate) fn socket_path(&self) -> Option<&Path> {
+        self.socket_path.as_deref()
     }
 }
 
@@ -439,7 +454,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn detect_returns_some_when_herdr_env_is_1_and_none_otherwise() {
+    fn from_env_returns_some_when_herdr_env_is_1_and_none_otherwise() {
         let _guard = ENV_MUTEX.lock().expect("lock env mutex");
 
         set_env("HERDR_ENV", "1");
@@ -447,7 +462,7 @@ mod tests {
         set_env("HERDR_TAB_ID", "w1:t1");
         set_env("HERDR_WORKSPACE_ID", "w1");
 
-        let detected = Herdr::detect();
+        let detected = Herdr::from_env();
         expect_that!(detected, some(anything()));
         let herdr = detected.expect("detected");
         expect_that!(herdr.pane_id(), some(eq("w1:p1")));
@@ -455,26 +470,30 @@ mod tests {
         expect_that!(herdr.workspace_id(), some(eq("w1")));
 
         remove_env("HERDR_ENV");
-        expect_that!(Herdr::detect(), none());
+        expect_that!(Herdr::from_env(), none());
     }
 
     #[googletest::test]
     fn from_env_populates_all_environment_context() {
         let _guard = ENV_MUTEX.lock().expect("lock env mutex");
 
+        set_env("HERDR_ENV", "1");
         set_env("HERDR_BIN_PATH", "/custom/bin/herdr");
         set_env("HERDR_WORKSPACE_ID", "ws-42");
         set_env("HERDR_TAB_ID", "ws-42:t9");
         set_env("HERDR_PANE_ID", "ws-42:p9");
         set_env("HERDR_SOCKET_PATH", "/custom/socket.sock");
 
-        let herdr = Herdr::from_env();
+        let detected = Herdr::from_env();
+        expect_that!(detected, some(anything()));
+        let herdr = detected.expect("from_env");
         expect_that!(herdr.binary(), eq(Path::new("/custom/bin/herdr")));
         expect_that!(herdr.workspace_id(), some(eq("ws-42")));
         expect_that!(herdr.tab_id(), some(eq("ws-42:t9")));
         expect_that!(herdr.pane_id(), some(eq("ws-42:p9")));
         expect_that!(herdr.socket_path(), some(eq(Path::new("/custom/socket.sock"))));
 
+        remove_env("HERDR_ENV");
         remove_env("HERDR_BIN_PATH");
         remove_env("HERDR_WORKSPACE_ID");
         remove_env("HERDR_TAB_ID");
@@ -486,7 +505,7 @@ mod tests {
     fn create_tab_parses_json_response_and_returns_created_tab() {
         let script = r#"#!/bin/sh
 if [ "$1" = "tab" ] && [ "$2" = "create" ]; then
-    echo '{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"w1:p8","tab_id":"w1:t8","workspace_id":"w1"},"tab":{"label":"my-workspace","tab_id":"w1:t8","workspace_id":"w1"},"type":"tab_created"}}'
+    echo '{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"w1:p8"},"tab":{"label":"my-workspace","tab_id":"w1:t8","workspace_id":"w1"},"type":"tab_created"}}'
     exit 0
 fi
 echo "Unexpected args: $*" >&2
@@ -577,15 +596,19 @@ exit 0
     }
 
     #[googletest::test]
-    fn open_workspace_tab_and_execute_runs_full_lifecycle() {
+    fn run_command_decides_to_create_tab_when_not_in_workspace_tab() {
         let log_file = tempfile::NamedTempFile::new().expect("temp file");
         let log_path = log_file.path().to_string_lossy().to_string();
 
         let script = format!(
             r#"#!/bin/sh
 echo "$*" >> "{log_path}"
+if [ "$1" = "tab" ] && [ "$2" = "get" ]; then
+    echo '{{"id":"cli:tab:get","result":{{"tab":{{"label":"other-tab","tab_id":"w1:t1","workspace_id":"w1"}},"type":"tab_info"}}}}'
+    exit 0
+fi
 if [ "$1" = "tab" ] && [ "$2" = "create" ]; then
-    echo '{{"id":"cli:tab:create","result":{{"root_pane":{{"pane_id":"w1:p12","tab_id":"w1:t12","workspace_id":"w1"}},"tab":{{"label":"ws-test","tab_id":"w1:t12","workspace_id":"w1"}},"type":"tab_created"}}}}'
+    echo '{{"id":"cli:tab:create","result":{{"root_pane":{{"pane_id":"w1:p12"}},"tab":{{"label":"ws-test","tab_id":"w1:t12","workspace_id":"w1"}},"type":"tab_created"}}}}'
     exit 0
 fi
 echo '{{"result":{{"type":"ok"}}}}'
@@ -593,18 +616,15 @@ exit 0
 "#
         );
         let (_dir, script_path) = create_mock_script(&script);
-        let herdr = Herdr::new(script_path);
+        let herdr = Herdr::new(script_path).with_tab_id("w1:t1");
 
-        let res = herdr.open_workspace_tab_and_execute(
+        let res = herdr.run_command(
             "ws-test",
             "fence -- echo 1",
             "agy",
             Some(Path::new("/tmp/test")),
         );
         expect_that!(res, ok(anything()));
-        let created = res.expect("open_workspace_tab_and_execute");
-        expect_that!(created.tab_id.as_str(), eq("w1:t12"));
-        expect_that!(created.root_pane_id.as_str(), eq("w1:p12"));
 
         let logged = std::fs::read_to_string(&log_path).expect("read log");
         expect_that!(
@@ -619,6 +639,45 @@ exit 0
             logged.as_str(),
             contains_substring("pane run w1:p12 fence -- echo 1")
         );
+    }
+
+    #[googletest::test]
+    fn run_command_decides_to_run_in_place_when_already_in_workspace_tab() {
+        let log_file = tempfile::NamedTempFile::new().expect("temp file");
+        let log_path = log_file.path().to_string_lossy().to_string();
+
+        let script = format!(
+            r#"#!/bin/sh
+echo "$*" >> "{log_path}"
+if [ "$1" = "tab" ] && [ "$2" = "get" ]; then
+    echo '{{"id":"cli:tab:get","result":{{"tab":{{"label":"ws-current","tab_id":"w1:t5","workspace_id":"w1"}},"type":"tab_info"}}}}'
+    exit 0
+fi
+echo '{{"result":{{"type":"ok"}}}}'
+exit 0
+"#
+        );
+        let (_dir, script_path) = create_mock_script(&script);
+        let herdr = Herdr::new(script_path)
+            .with_tab_id("w1:t5")
+            .with_pane_id("w1:p5");
+
+        let res = herdr.run_command(
+            "ws-current",
+            "true",
+            "agy",
+            None,
+        );
+        expect_that!(res, ok(anything()));
+
+        let logged = std::fs::read_to_string(&log_path).expect("read log");
+        // Must inform Herdr about agent on current pane
+        expect_that!(
+            logged.as_str(),
+            contains_substring("pane report-agent --source aiw --agent agy --state working w1:p5")
+        );
+        // Must NOT create a new tab
+        expect_that!(logged.as_str(), not(contains_substring("tab create")));
     }
 
     #[googletest::test]

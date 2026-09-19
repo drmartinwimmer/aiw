@@ -9,6 +9,8 @@ pub enum SandboxError {
     FenceNotFound,
     #[error("Invalid argument ordering: {0}")]
     InvalidArgOrder(String),
+    #[error("Sandbox command failed with exit status: {0}")]
+    ExecutionFailed(ExitStatus),
     #[error("I/O error during sandbox execution: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -129,14 +131,18 @@ impl<'a> SandboxBuilder<'a> {
         self.construct_command()
     }
 
-    /// Executes fence synchronously, forwarding standard I/O and returning its ExitStatus.
-    pub fn run(&self) -> Result<ExitStatus, SandboxError> {
+    /// Executes fence synchronously, forwarding standard I/O.
+    /// Returns `Ok(())` on success, or `Err(SandboxError::ExecutionFailed)` if the command exited with a non-zero status.
+    pub fn run(&self) -> Result<(), SandboxError> {
         let mut cmd = self.build_command()?;
         cmd.stdin(std::process::Stdio::inherit())
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit());
         let status = cmd.status()?;
-        Ok(status)
+        if !status.success() {
+            return Err(SandboxError::ExecutionFailed(status));
+        }
+        Ok(())
     }
 
     #[cfg(test)]

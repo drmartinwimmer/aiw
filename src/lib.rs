@@ -12,4 +12,4 @@ pub use direnv::Direnv;
 pub mod sandbox;
 pub use sandbox::{SandboxBuilder, SandboxError};
 pub mod herdr;
-pub use herdr::{CreatedTab, Herdr, HerdrError, TabInfo};
+pub use herdr::{Herdr, HerdrError};
