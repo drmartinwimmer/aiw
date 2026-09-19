@@ -88,6 +88,30 @@ impl AgyCommand {
         if self.dry_run {
             println!("{builder}");
             Ok(ExitCode::SUCCESS)
+        } else if aiw::herdr::Herdr::is_inside_herdr() {
+            let herdr = aiw::herdr::Herdr::from_env();
+            if herdr.is_current_tab_named(&self.workspace_name) {
+                if let Some(pane_id) = herdr.pane_id()
+                    && let Err(err) = herdr.inform_agent(pane_id, "agy")
+                {
+                    eprintln!("Warning: failed to inform Herdr about agent: {err}");
+                }
+                let status = builder.run()?;
+                let code = match status.code() {
+                    Some(c) => u8::try_from(c).unwrap_or(1),
+                    None => 1,
+                };
+                Ok(ExitCode::from(code))
+            } else {
+                let cmd = format!("{builder}");
+                herdr.open_workspace_tab_and_execute(
+                    &self.workspace_name,
+                    &cmd,
+                    "agy",
+                    Some(workspace.path()),
+                )?;
+                Ok(ExitCode::SUCCESS)
+            }
         } else {
             let status = builder.run()?;
             let code = match status.code() {
@@ -122,6 +146,8 @@ enum AppError {
     Config(#[from] aiw::ConfigError),
     #[error("{0}")]
     Sandbox(#[from] aiw::SandboxError),
+    #[error("{0}")]
+    Herdr(#[from] aiw::HerdrError),
     #[error("{0}")]
     Io(#[from] std::io::Error),
 }
