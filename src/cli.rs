@@ -16,9 +16,9 @@ impl Cli {
 
 #[derive(Subcommand, Debug, PartialEq, Eq)]
 enum Commands {
-    /// Launch agy in an isolated Fence sandbox for a Jujutsu workspace
+    /// Launch agy in an isolated Fence sandbox for a workspace
     Agy(AgyCommand),
-    /// Forget a Jujutsu workspace
+    /// Forget a workspace
     Forget(ForgetCommand),
 }
 
@@ -40,8 +40,7 @@ struct ForgetCommand {
 impl ForgetCommand {
     fn run(&self) -> Result<(), AppError> {
         let current_dir = std::env::current_dir()?;
-        let repo_root = aiw::workspace::find_jj_root(&current_dir)?;
-        let workspace = aiw::workspace::Workspace::new(&repo_root, &self.workspace_name)?;
+        let workspace = aiw::workspace::Workspace::from_dir(&current_dir, &self.workspace_name)?;
         workspace.forget()?;
         Ok(())
     }
@@ -73,14 +72,14 @@ impl AgyCommand {
 
     fn run(&self) -> Result<(), AppError> {
         let current_dir = std::env::current_dir()?;
-        let repo_root = aiw::workspace::find_jj_root(&current_dir)?;
+        let workspace = aiw::workspace::Workspace::from_dir(&current_dir, &self.workspace_name)?;
+        let repo_root = workspace.repo_root();
 
         if repo_root.join("aiw.json").exists() {
-            let _ = aiw::config::AiwConfig::find_and_load(&repo_root)?;
+            let _ = aiw::config::AiwConfig::find_and_load(repo_root)?;
         }
 
-        let direnv = aiw::direnv::Direnv::new(&repo_root);
-        let workspace = aiw::workspace::Workspace::new(&repo_root, &self.workspace_name)?;
+        let direnv = aiw::direnv::Direnv::new(repo_root);
         let is_new_workspace = workspace.ensure()?;
 
         if is_new_workspace {

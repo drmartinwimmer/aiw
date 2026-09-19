@@ -2,6 +2,59 @@ use googletest::prelude::*;
 use std::path::Path;
 use std::process::{Command, Output};
 
+fn can_run_fence() -> bool {
+    if which::which("fence").is_err() {
+        return false;
+    }
+    let output = Command::new("fence").args(["--", "true"]).output();
+    matches!(output, Ok(out) if out.status.success())
+}
+
+fn init_test_git_repo(path: &Path) {
+    let output = Command::new("git")
+        .args(["init", "-b", "main"])
+        .arg(path)
+        .output();
+
+    let success = matches!(output, Ok(ref out) if out.status.success());
+    if !success {
+        let fallback = Command::new("git")
+            .arg("init")
+            .arg(path)
+            .output()
+            .expect("git init");
+        assert!(fallback.status.success(), "Failed to initialize Git repository");
+    }
+
+    drop(
+        Command::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(path)
+            .output(),
+    );
+    drop(
+        Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(path)
+            .output(),
+    );
+
+    let dummy_file = path.join(".gitignore");
+    std::fs::write(&dummy_file, ".workspaces/\n").expect("write .gitignore");
+    drop(
+        Command::new("git")
+            .args(["add", ".gitignore"])
+            .current_dir(path)
+            .output(),
+    );
+    drop(
+        Command::new("git")
+            .args(["commit", "-m", "Initial commit"])
+            .current_dir(path)
+            .output(),
+    );
+}
+
 fn init_test_jj_repo(path: &Path) {
     let output = Command::new("jj")
         .args(["--no-pager", "git", "init"])
@@ -138,7 +191,7 @@ fn missing_jj_repository_fails_with_clear_error() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     expect_that!(
         stderr.as_ref(),
-        contains_substring("Error: Not inside a Jujutsu repository")
+        contains_substring("Error: Not inside a Jujutsu or Git repository")
     );
 }
 
@@ -163,8 +216,8 @@ fn invalid_config_json_fails_with_parse_error() {
 
 #[googletest::test]
 fn live_fence_execution_in_temp_workspace_runs_and_verifies_containment() {
-    if which::which("fence").is_err() || which::which("agy").is_err() {
-        eprintln!("Skipping live_fence_execution test: fence or agy not found in PATH");
+    if which::which("fence").is_err() || which::which("agy").is_err() || !can_run_fence() {
+        eprintln!("Skipping live_fence_execution test: fence cannot execute in this environment");
         return;
     }
 
@@ -188,8 +241,8 @@ fn live_fence_execution_in_temp_workspace_runs_and_verifies_containment() {
 
 #[googletest::test]
 fn jj_commands_in_fence_sandbox_execute_successfully_and_persist_commits() {
-    if which::which("fence").is_err() || which::which("jj").is_err() {
-        eprintln!("Skipping jj_commands_in_fence_sandbox test: fence or jj not found in PATH");
+    if which::which("fence").is_err() || which::which("jj").is_err() || !can_run_fence() {
+        eprintln!("Skipping jj_commands_in_fence_sandbox test: fence cannot execute in this environment");
         return;
     }
 
@@ -335,8 +388,8 @@ fn recreating_forgotten_workspace_calls_direnv_allow() {
 
 #[googletest::test]
 fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
-    if which::which("fence").is_err() || which::which("direnv").is_err() {
-        eprintln!("Skipping sandbox_command_runs_in_correct_working_directory_and_loads_direnv: fence or direnv not found");
+    if which::which("fence").is_err() || which::which("direnv").is_err() || !can_run_fence() {
+        eprintln!("Skipping sandbox_command_runs_in_correct_working_directory_and_loads_direnv: fence cannot execute in this environment");
         return;
     }
 
@@ -726,4 +779,141 @@ exit 0
     assert!(output.status.success());
     let logged = std::fs::read_to_string(&log_path).expect("read log");
     expect_that!(logged.as_str(), eq(""));
+}
+
+#[googletest::test]
+fn workspace_creation_and_dry_run_in_real_git_repo_succeeds() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let repo_root = temp_dir.path();
+    init_test_git_repo(repo_root);
+    write_test_fence_json(repo_root);
+
+    let output = run_aiw(repo_root, &["agy", "test-git-workspace", "--dry-run"]);
+    expect_that!(output.status.success(), is_true());
+
+    let ws_path = repo_root.join(".workspaces").join("test-git-workspace");
+    expect_that!(ws_path.exists(), is_true());
+    expect_that!(ws_path.join(".git").exists(), is_true());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    expect_that!(stdout.as_ref(), starts_with("fence "));
+    expect_that!(stdout.as_ref(), contains_substring("--settings"));
+    expect_that!(stdout.as_ref(), contains_substring("agy"));
+    expect_that!(
+        stdout.as_ref(),
+        contains_substring("--dangerously-skip-permissions")
+    );
+
+    let wt_list = Command::new("git")
+        .args(["--no-pager", "worktree", "list", "--porcelain"])
+        .current_dir(repo_root)
+        .output()
+        .expect("git worktree list");
+    expect_that!(wt_list.status.success(), is_true());
+    let list_stdout = String::from_utf8_lossy(&wt_list.stdout);
+    expect_that!(list_stdout.as_ref(), contains_substring("test-git-workspace"));
+}
+
+#[googletest::test]
+fn idempotent_workspace_reuse_in_real_git_repo_succeeds() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let repo_root = temp_dir.path();
+    init_test_git_repo(repo_root);
+    write_test_fence_json(repo_root);
+
+    let first_output = run_aiw(repo_root, &["agy", "reused-git-workspace", "--dry-run"]);
+    expect_that!(first_output.status.success(), is_true());
+
+    let ws_path = repo_root.join(".workspaces").join("reused-git-workspace");
+    expect_that!(ws_path.exists(), is_true());
+    expect_that!(ws_path.join(".git").exists(), is_true());
+
+    let second_output = run_aiw(repo_root, &["agy", "reused-git-workspace", "--dry-run"]);
+    expect_that!(second_output.status.success(), is_true());
+
+    let wt_list = Command::new("git")
+        .args(["--no-pager", "worktree", "list", "--porcelain"])
+        .current_dir(repo_root)
+        .output()
+        .expect("git worktree list");
+    expect_that!(wt_list.status.success(), is_true());
+    let list_stdout = String::from_utf8_lossy(&wt_list.stdout);
+    expect_that!(list_stdout.as_ref(), contains_substring("reused-git-workspace"));
+}
+
+#[googletest::test]
+fn forget_subcommand_removes_workspace_from_git_worktree_list() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let repo_root = temp_dir.path();
+    init_test_git_repo(repo_root);
+    write_test_fence_json(repo_root);
+
+    let create_output = run_aiw(repo_root, &["agy", "ws-to-forget-git", "--dry-run"]);
+    expect_that!(create_output.status.success(), is_true());
+
+    let ws_path = repo_root.join(".workspaces").join("ws-to-forget-git");
+    expect_that!(ws_path.exists(), is_true());
+
+    let list_before = Command::new("git")
+        .args(["--no-pager", "worktree", "list", "--porcelain"])
+        .current_dir(repo_root)
+        .output()
+        .expect("git worktree list");
+    expect_that!(
+        String::from_utf8_lossy(&list_before.stdout).as_ref(),
+        contains_substring("ws-to-forget-git")
+    );
+
+    let forget_output = run_aiw(repo_root, &["forget", "ws-to-forget-git"]);
+    expect_that!(forget_output.status.success(), is_true());
+
+    let list_after = Command::new("git")
+        .args(["--no-pager", "worktree", "list", "--porcelain"])
+        .current_dir(repo_root)
+        .output()
+        .expect("git worktree list");
+    expect_that!(
+        String::from_utf8_lossy(&list_after.stdout).as_ref(),
+        not(contains_substring("ws-to-forget-git"))
+    );
+    expect_that!(ws_path.exists(), is_false());
+}
+
+#[googletest::test]
+fn git_repo_in_subdirectory_discovers_root_and_creates_workspace() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let repo_root = temp_dir.path();
+    init_test_git_repo(repo_root);
+    write_test_fence_json(repo_root);
+
+    let sub = repo_root.join("deep").join("nested");
+    std::fs::create_dir_all(&sub).expect("create deep sub");
+
+    let output = run_aiw(&sub, &["agy", "from-sub-git", "--dry-run"]);
+    expect_that!(output.status.success(), is_true());
+
+    let ws_path = repo_root.join(".workspaces").join("from-sub-git");
+    expect_that!(ws_path.exists(), is_true());
+    expect_that!(ws_path.join(".git").exists(), is_true());
+}
+
+#[googletest::test]
+fn git_repo_inside_worktree_discovers_main_root() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let repo_root = temp_dir.path();
+    init_test_git_repo(repo_root);
+    write_test_fence_json(repo_root);
+
+    let out1 = run_aiw(repo_root, &["agy", "first-git-ws", "--dry-run"]);
+    expect_that!(out1.status.success(), is_true());
+
+    let first_ws = repo_root.join(".workspaces").join("first-git-ws");
+    expect_that!(first_ws.exists(), is_true());
+
+    let out2 = run_aiw(&first_ws, &["agy", "second-git-ws", "--dry-run"]);
+    expect_that!(out2.status.success(), is_true());
+
+    let second_ws = repo_root.join(".workspaces").join("second-git-ws");
+    expect_that!(second_ws.exists(), is_true());
+    expect_that!(first_ws.join(".workspaces").exists(), is_false());
 }
