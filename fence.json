@@ -1,35 +1,13 @@
 {
   "$schema": "https://raw.githubusercontent.com/fencesandbox/fence/main/docs/schema/fence.schema.json",
-  "extends": "code",
-  "network": {
-    "allowLocalOutbound": false,
-    "allowedDomains": [
-      "*.googleapis.com",
-      "*.google.com",
-      "*.googleusercontent.com",
-      "*.gstatic.com",
-      "daily-cloudcode-pa.googleapis.com",
-      "cloudcode-pa.googleapis.com"
-    ]
-  },
+  "extends": "./templates/aiw.json",
   "filesystem": {
     "allowRead": [
       "/nix"
     ],
     "allowWrite": [
-      ".",
-      ".jj/**",
       ".git/**",
-      "../../.jj/**",
-      "../../.git/**",
-      ".workspaces/**",
-      "~/.gemini/**",
-      "~/.local/share/keyrings/**"
-    ]
-  },
-  "command": {
-    "acceptSharedBinaryCannotRuntimeDeny": [
-      "chroot"
+      "../../.git/**"
     ]
   }
 }

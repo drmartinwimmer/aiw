@@ -1,5 +1,4 @@
 use clap::{Parser, Subcommand};
-use crate::config::{AiwConfig, ConfigError};
 use crate::direnv::Direnv;
 use crate::herdr::{Herdr, HerdrError};
 use crate::sandbox::{SandboxBuilder, SandboxError};
@@ -80,10 +79,6 @@ impl AgyCommand {
         let workspace = Workspace::from_dir(&current_dir, &self.workspace_name)?;
         let repo_root = workspace.repo_root();
 
-        if repo_root.join("aiw.json").exists() {
-            let _ = AiwConfig::find_and_load(repo_root)?;
-        }
-
         let direnv = Direnv::new(repo_root);
         let is_new_workspace = workspace.ensure()?;
 
@@ -118,8 +113,6 @@ impl AgyCommand {
 pub enum AppError {
     #[error("{0}")]
     Workspace(#[from] WorkspaceError),
-    #[error("{0}")]
-    Config(#[from] ConfigError),
     #[error("{0}")]
     Sandbox(#[from] SandboxError),
     #[error("{0}")]

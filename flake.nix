@@ -46,6 +46,11 @@
             chmod +x $HOME/bin/agy
             export PATH="$HOME/bin:$PATH"
           '';
+          postInstall = ''
+            mkdir -p $out/share/aiw/templates $out/share/fence/templates
+            cp templates/aiw.json $out/share/aiw/templates/
+            cp templates/aiw.json $out/share/fence/templates/
+          '';
         };
       in
       {

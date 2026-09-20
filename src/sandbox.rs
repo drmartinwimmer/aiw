@@ -85,6 +85,42 @@ impl<'a> SandboxBuilder<'a> {
         Ok(())
     }
 
+    fn resolve_template_path(&self) -> Option<PathBuf> {
+        let candidates = [
+            self.workspace_path.join("templates").join("aiw.json"),
+            self.repo_root.join("templates").join("aiw.json"),
+        ];
+        if let Some(p) = candidates.into_iter().find(|p| p.exists()) {
+            return Some(p);
+        }
+
+        if let Ok(exe) = std::env::current_exe()
+            && let Some(bin_dir) = exe.parent()
+        {
+            let nix_or_cargo_share = bin_dir.join("../share/aiw/templates/aiw.json");
+            if nix_or_cargo_share.exists() {
+                return Some(nix_or_cargo_share);
+            }
+            let fence_share = bin_dir.join("../share/fence/templates/aiw.json");
+            if fence_share.exists() {
+                return Some(fence_share);
+            }
+        }
+
+        if let Ok(home) = std::env::var("HOME") {
+            let user_fence_tpl = PathBuf::from(&home).join(".config/fence/templates/aiw.json");
+            if user_fence_tpl.exists() {
+                return Some(user_fence_tpl);
+            }
+            let user_local_tpl = PathBuf::from(&home).join(".local/share/fence/templates/aiw.json");
+            if user_local_tpl.exists() {
+                return Some(user_local_tpl);
+            }
+        }
+
+        None
+    }
+
     fn resolve_settings_path(&self) -> Option<PathBuf> {
         if let Some(path) = self.settings_path
             && path.exists()
@@ -99,7 +135,10 @@ impl<'a> SandboxBuilder<'a> {
             self.repo_root.join("fence.json"),
         ];
 
-        candidates.into_iter().find(|p| p.exists())
+        candidates
+            .into_iter()
+            .find(|p| p.exists())
+            .or_else(|| self.resolve_template_path())
     }
 
     fn construct_command(&self) -> Result<Command, SandboxError> {
@@ -250,6 +289,29 @@ mod tests {
         expect_that!(
             &args[..],
             contains_subslice(&["--", "agy", "--dangerously-skip-permissions"])
+        );
+    }
+
+    #[googletest::test]
+    fn build_args_without_fence_json_but_with_aiw_template_in_repo_uses_template_as_settings() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = temp_dir.path().join("repo");
+        let workspace_path = repo_root.join(".workspaces").join("ws");
+        std::fs::create_dir_all(&workspace_path).expect("create ws");
+
+        let tpl_dir = repo_root.join("templates");
+        std::fs::create_dir_all(&tpl_dir).expect("create tpl dir");
+        let tpl_file = tpl_dir.join("aiw.json");
+        std::fs::write(&tpl_file, r#"{"extends": "code"}"#).expect("write tpl");
+
+        let cmd = vec!["agy".to_string()];
+        let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd);
+        let args = builder.build_args().expect("build_args");
+
+        let tpl_str = tpl_file.display().to_string();
+        expect_that!(
+            args.as_slice(),
+            contains_subslice(&["--settings", &tpl_str])
         );
     }
 

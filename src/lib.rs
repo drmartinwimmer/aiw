@@ -9,6 +9,5 @@ pub mod direnv;
 pub mod sandbox;
 pub mod workspace;
 
-pub(crate) mod config;
 pub(crate) mod herdr;
 pub(crate) mod vcs;

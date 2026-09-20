@@ -77,27 +77,26 @@ fn init_test_jj_repo(path: &Path) {
 }
 
 fn write_test_fence_json(repo_root: &Path) {
-    let content = r#"{
+    let tpl_dir = repo_root.join("templates");
+    std::fs::create_dir_all(&tpl_dir).expect("create templates dir");
+    let tpl_content = r#"{
   "extends": "code",
   "network": {
     "allowLocalOutbound": false,
     "allowedDomains": [
-      "*.googleapis.com",
-      "*.google.com",
-      "*.googleusercontent.com",
-      "*.gstatic.com",
+      "cloudcode-pa.googleapis.com",
       "daily-cloudcode-pa.googleapis.com",
-      "cloudcode-pa.googleapis.com"
+      "aicode.googleapis.com",
+      "aiplatform.googleapis.com",
+      "oauth2.googleapis.com",
+      "accounts.google.com"
     ]
   },
   "filesystem": {
-    "allowRead": ["/nix"],
     "allowWrite": [
       ".",
       ".jj/**",
-      ".git/**",
       "../../.jj/**",
-      "../../.git/**",
       ".workspaces/**",
       "~/.gemini/**",
       "~/.local/share/**",
@@ -108,7 +107,19 @@ fn write_test_fence_json(repo_root: &Path) {
     "acceptSharedBinaryCannotRuntimeDeny": ["chroot"]
   }
 }"#;
-    std::fs::write(repo_root.join("fence.json"), content).expect("write fence.json");
+    std::fs::write(tpl_dir.join("aiw.json"), tpl_content).expect("write templates/aiw.json");
+
+    let fence_content = r#"{
+  "extends": "./templates/aiw.json",
+  "filesystem": {
+    "allowRead": ["/nix"],
+    "allowWrite": [
+      ".git/**",
+      "../../.git/**"
+    ]
+  }
+}"#;
+    std::fs::write(repo_root.join("fence.json"), fence_content).expect("write fence.json");
 }
 
 fn run_aiw(cwd: &Path, args: &[&str]) -> Output {
@@ -193,25 +204,6 @@ fn missing_jj_repository_fails_with_clear_error() {
     expect_that!(
         stderr.as_ref(),
         contains_substring("Error: Not inside a Jujutsu or Git repository")
-    );
-}
-
-#[googletest::test]
-fn invalid_config_json_fails_with_parse_error() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
-    let repo_root = temp_dir.path();
-    init_test_jj_repo(repo_root);
-
-    std::fs::write(repo_root.join("aiw.json"), "not valid json {").expect("write bad json");
-
-    let output = run_aiw(repo_root, &["agy", "test-workspace", "--dry-run"]);
-    expect_that!(output.status.success(), is_false());
-    expect_that!(output.status.code(), eq(Some(1)));
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    expect_that!(
-        stderr.as_ref(),
-        contains_substring("Error: Failed to parse JSON in configuration file")
     );
 }
 
