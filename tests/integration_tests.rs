@@ -413,7 +413,7 @@ fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
         .expect("direnv allow on repo root");
     assert!(allow_repo.status.success(), "allow repo root failed");
 
-    let ws = aiw::Workspace::new(repo_root, "direnv-ws").expect("Workspace::new");
+    let ws = aiw::workspace::Workspace::new(repo_root, "direnv-ws").expect("Workspace::new");
     ws.ensure().expect("ensure_workspace");
     let ws_path = ws.path().to_path_buf();
 
@@ -917,3 +917,48 @@ fn git_repo_inside_worktree_discovers_main_root() {
     expect_that!(second_ws.exists(), is_true());
     expect_that!(first_ws.join(".workspaces").exists(), is_false());
 }
+
+#[googletest::test]
+fn git_repo_nested_inside_jj_repo_identifies_git_root_and_creates_git_workspace() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let outer_jj = temp_dir.path();
+    init_test_jj_repo(outer_jj);
+
+    let nested_git = outer_jj.join("sub_git_project");
+    std::fs::create_dir_all(&nested_git).expect("create nested git project directory");
+    init_test_git_repo(&nested_git);
+    write_test_fence_json(&nested_git);
+
+    // 1. Run aiw directly inside the nested git repo root
+    let out = run_aiw(&nested_git, &["agy", "nested-git-ws", "--dry-run"]);
+    expect_that!(out.status.success(), is_true());
+
+    let nested_ws = nested_git.join(".workspaces").join("nested-git-ws");
+    expect_that!(nested_ws.exists(), is_true());
+    // Must be a Git worktree, containing .git file/pointer
+    expect_that!(nested_ws.join(".git").exists(), is_true());
+    // Outer JJ repo must NOT have created .workspaces
+    expect_that!(outer_jj.join(".workspaces").exists(), is_false());
+
+    // Verify git worktree list inside nested git includes the workspace
+    let wt_list = Command::new("git")
+        .args(["--no-pager", "worktree", "list", "--porcelain"])
+        .current_dir(&nested_git)
+        .output()
+        .expect("git worktree list in nested git");
+    expect_that!(wt_list.status.success(), is_true());
+    let list_stdout = String::from_utf8_lossy(&wt_list.stdout);
+    expect_that!(list_stdout.as_ref(), contains_substring("nested-git-ws"));
+
+    // 2. Also run aiw from a deeper subdirectory within the nested git repo
+    let deep_nested = nested_git.join("src").join("components");
+    std::fs::create_dir_all(&deep_nested).expect("create deep nested directory");
+    let deep_out = run_aiw(&deep_nested, &["agy", "from-deep-sub", "--dry-run"]);
+    expect_that!(deep_out.status.success(), is_true());
+
+    let deep_ws = nested_git.join(".workspaces").join("from-deep-sub");
+    expect_that!(deep_ws.exists(), is_true());
+    expect_that!(deep_ws.join(".git").exists(), is_true());
+    expect_that!(outer_jj.join(".workspaces").exists(), is_false());
+}
+

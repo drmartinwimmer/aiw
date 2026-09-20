@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::vcs::VcsType;
+use crate::vcs::Vcs;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorkspaceError {
@@ -20,21 +20,6 @@ pub enum WorkspaceError {
     Io(#[from] std::io::Error),
 }
 
-/// Finds the root directory of the enclosing Jujutsu repository by invoking `jj --no-pager root`.
-pub fn find_jj_root(start_dir: &Path) -> Result<PathBuf, WorkspaceError> {
-    crate::vcs::jj::find_root(start_dir)
-}
-
-/// Finds the root directory of the enclosing Git repository.
-pub fn find_git_root(start_dir: &Path) -> Result<PathBuf, WorkspaceError> {
-    crate::vcs::git::find_root(start_dir)
-}
-
-/// Auto-detects the repository root and VCS type for `start_dir`.
-pub fn find_root(start_dir: &Path) -> Result<(PathBuf, VcsType), WorkspaceError> {
-    crate::vcs::detect(start_dir)
-}
-
 fn validate_workspace_name(workspace_name: &str) -> Result<(), WorkspaceError> {
     if workspace_name.is_empty()
         || workspace_name == "."
@@ -51,79 +36,35 @@ fn validate_workspace_name(workspace_name: &str) -> Result<(), WorkspaceError> {
 
 /// Encapsulates state and operations for a workspace under `<repo_root>/.workspaces/<name>`.
 ///
-/// Supports both Jujutsu workspaces and Git worktrees.
+/// Supports both Jujutsu workspaces and Git worktrees via an internal `Vcs` engine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Workspace {
-    repo_root: PathBuf,
+    vcs: Vcs,
     name: String,
     path: PathBuf,
-    vcs: VcsType,
 }
 
 impl Workspace {
     /// Creates a new `Workspace` instance for a given repository root and workspace name.
-    ///
-    /// Validates that the name is valid and auto-detects whether `repo_root` is a Jujutsu or Git repository.
     pub fn new(repo_root: &Path, name: &str) -> Result<Self, WorkspaceError> {
-        validate_workspace_name(name)?;
-
-        let abs_repo_root = if repo_root.is_absolute() {
-            repo_root.to_path_buf()
-        } else if let Ok(cwd) = std::env::current_dir() {
-            cwd.join(repo_root)
-        } else {
-            repo_root.to_path_buf()
-        };
-
-        let vcs = if abs_repo_root.join(".jj").exists() {
-            VcsType::Jj
-        } else if abs_repo_root.join(".git").exists() {
-            VcsType::Git
-        } else {
-            let (_, detected) = crate::vcs::detect(&abs_repo_root)?;
-            detected
-        };
-
-        let path = abs_repo_root.join(".workspaces").join(name);
-        Ok(Self {
-            repo_root: abs_repo_root,
-            name: name.to_string(),
-            path,
-            vcs,
-        })
-    }
-
-    /// Creates a new `Workspace` instance with an explicitly specified VCS type.
-    pub fn new_with_vcs(repo_root: &Path, name: &str, vcs: VcsType) -> Result<Self, WorkspaceError> {
-        validate_workspace_name(name)?;
-
-        let abs_repo_root = if repo_root.is_absolute() {
-            repo_root.to_path_buf()
-        } else if let Ok(cwd) = std::env::current_dir() {
-            cwd.join(repo_root)
-        } else {
-            repo_root.to_path_buf()
-        };
-
-        let path = abs_repo_root.join(".workspaces").join(name);
-        Ok(Self {
-            repo_root: abs_repo_root,
-            name: name.to_string(),
-            path,
-            vcs,
-        })
+        let vcs = Vcs::from_path(repo_root)?;
+        Self::from_vcs(vcs, name)
     }
 
     /// Discovers the repository root and VCS enclosing `dir` and returns a `Workspace` handle.
     pub fn from_dir(dir: &Path, name: &str) -> Result<Self, WorkspaceError> {
-        let (repo_root, vcs) = find_root(dir)?;
-        Self::new_with_vcs(&repo_root, name, vcs)
+        let vcs = Vcs::from_path(dir)?;
+        Self::from_vcs(vcs, name)
     }
 
-    /// Returns the detected or configured VCS type.
-    #[must_use]
-    pub fn vcs(&self) -> VcsType {
-        self.vcs
+    fn from_vcs(vcs: Vcs, name: &str) -> Result<Self, WorkspaceError> {
+        validate_workspace_name(name)?;
+        let path = vcs.repo_root().join(".workspaces").join(name);
+        Ok(Self {
+            vcs,
+            name: name.to_string(),
+            path,
+        })
     }
 
     /// Returns the workspace name.
@@ -141,7 +82,7 @@ impl Workspace {
     /// Returns the enclosing repository root path.
     #[must_use]
     pub fn repo_root(&self) -> &Path {
-        &self.repo_root
+        self.vcs.repo_root()
     }
 
     /// Returns `true` if the workspace currently exists on disk and contains appropriate VCS metadata.
@@ -154,7 +95,7 @@ impl Workspace {
     ///
     /// Returns `Ok(true)` if the workspace was newly created, or `Ok(false)` if it already existed.
     pub fn ensure(&self) -> Result<bool, WorkspaceError> {
-        let is_registered = self.vcs.is_workspace_registered(&self.repo_root, &self.name)?;
+        let is_registered = self.vcs.is_workspace_registered(&self.name)?;
         if is_registered && self.exists() {
             return Ok(false);
         }
@@ -164,18 +105,18 @@ impl Workspace {
             std::fs::remove_dir_all(&self.path)?;
         }
 
-        let workspaces_dir = self.repo_root.join(".workspaces");
+        let workspaces_dir = self.repo_root().join(".workspaces");
         std::fs::create_dir_all(&workspaces_dir)?;
 
         let rel_workspace_path = Path::new(".workspaces").join(&self.name);
-        self.vcs.add_workspace(&self.repo_root, &rel_workspace_path, &self.name)?;
+        self.vcs.add_workspace(&rel_workspace_path, &self.name)?;
 
         Ok(true)
     }
 
     /// Forgets the workspace in the underlying VCS and removes the workspace directory from disk.
     pub fn forget(&self) -> Result<(), WorkspaceError> {
-        self.vcs.forget_workspace(&self.repo_root, &self.name)?;
+        self.vcs.forget_workspace(&self.name)?;
         if self.path.exists() {
             std::fs::remove_dir_all(&self.path)?;
         }
@@ -200,12 +141,8 @@ mod tests {
                 .args(["--no-pager", "init", "--git"])
                 .arg(path)
                 .output()
-                .expect("failed to run jj init or jj git init");
-            assert!(
-                fallback.status.success(),
-                "Failed to init jj repo: {}",
-                String::from_utf8_lossy(&fallback.stderr)
-            );
+                .expect("failed to run jj init");
+            assert!(fallback.status.success());
         }
     }
 
@@ -255,17 +192,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn find_jj_root_from_root_returns_root_path() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let repo_root = dir.path();
-        init_test_jj_repo(repo_root);
-
-        let found = find_jj_root(repo_root).expect("find_jj_root");
-        expect_that!(found, eq(repo_root));
-    }
-
-    #[googletest::test]
-    fn find_jj_root_from_deep_subdirectory_returns_root_path() {
+    fn workspace_from_dir_in_jj_repo_creates_workspace() {
         let dir = tempfile::tempdir().expect("tempdir");
         let repo_root = dir.path();
         init_test_jj_repo(repo_root);
@@ -273,59 +200,36 @@ mod tests {
         let sub = repo_root.join("sub1").join("sub2");
         std::fs::create_dir_all(&sub).expect("create_dir_all");
 
-        let found = find_jj_root(&sub).expect("find_jj_root");
-        expect_that!(found, eq(repo_root));
+        let ws = Workspace::from_dir(&sub, "jj-ws").expect("from_dir");
+        expect_that!(ws.name(), eq("jj-ws"));
+        expect_that!(ws.repo_root(), eq(repo_root));
+        expect_that!(ws.path(), eq(&repo_root.join(".workspaces").join("jj-ws")));
+        expect_that!(ws.exists(), is_false());
+
+        let created = ws.ensure().expect("ensure");
+        expect_that!(created, is_true());
+        expect_that!(ws.exists(), is_true());
     }
 
     #[googletest::test]
-    fn find_jj_root_outside_repo_returns_not_in_jj_repo_error() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let non_repo = dir.path();
-
-        let res = find_jj_root(non_repo);
-        expect_that!(
-            res,
-            matches_pattern!(Err(matches_pattern!(WorkspaceError::NotInJjRepo)))
-        );
-    }
-
-    #[googletest::test]
-    fn find_git_root_from_root_returns_root_path() {
+    fn workspace_from_dir_in_git_repo_creates_worktree() {
         let dir = tempfile::tempdir().expect("tempdir");
         let repo_root = dir.path();
         init_test_git_repo(repo_root);
 
-        let found = find_git_root(repo_root).expect("find_git_root");
+        let sub = repo_root.join("sub1").join("sub2");
+        std::fs::create_dir_all(&sub).expect("create_dir_all");
+
+        let ws = Workspace::from_dir(&sub, "git-ws").expect("from_dir");
         let canonical_root = repo_root.canonicalize().unwrap_or_else(|_| repo_root.to_path_buf());
-        expect_that!(found, eq(&canonical_root));
-    }
+        expect_that!(ws.name(), eq("git-ws"));
+        expect_that!(ws.repo_root(), eq(&canonical_root));
+        expect_that!(ws.path(), eq(&canonical_root.join(".workspaces").join("git-ws")));
+        expect_that!(ws.exists(), is_false());
 
-    #[googletest::test]
-    fn find_git_root_outside_repo_returns_not_in_git_repo_error() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let non_repo = dir.path();
-
-        let res = find_git_root(non_repo);
-        expect_that!(
-            res,
-            matches_pattern!(Err(matches_pattern!(WorkspaceError::NotInGitRepo)))
-        );
-    }
-
-    #[googletest::test]
-    fn find_root_auto_detects_jj_and_git() {
-        let dir_jj = tempfile::tempdir().expect("tempdir jj");
-        init_test_jj_repo(dir_jj.path());
-        let (root_jj, vcs_jj) = find_root(dir_jj.path()).expect("detect jj");
-        expect_that!(root_jj, eq(dir_jj.path()));
-        expect_that!(vcs_jj, eq(VcsType::Jj));
-
-        let dir_git = tempfile::tempdir().expect("tempdir git");
-        init_test_git_repo(dir_git.path());
-        let (root_git, vcs_git) = find_root(dir_git.path()).expect("detect git");
-        let canonical_git = dir_git.path().canonicalize().unwrap_or_else(|_| dir_git.path().to_path_buf());
-        expect_that!(root_git, eq(&canonical_git));
-        expect_that!(vcs_git, eq(VcsType::Git));
+        let created = ws.ensure().expect("ensure");
+        expect_that!(created, is_true());
+        expect_that!(ws.exists(), is_true());
     }
 
     #[googletest::test]
@@ -338,7 +242,6 @@ mod tests {
         let ws = Workspace::new(repo_root, ws_name).expect("Workspace::new");
         let expected_path = repo_root.join(".workspaces").join(ws_name);
 
-        expect_that!(ws.vcs(), eq(VcsType::Jj));
         expect_that!(ws.path(), eq(&expected_path));
         expect_that!(ws.exists(), is_false());
 
@@ -368,7 +271,6 @@ mod tests {
         let canonical_root = repo_root.canonicalize().unwrap_or_else(|_| repo_root.to_path_buf());
         let expected_path = canonical_root.join(".workspaces").join(ws_name);
 
-        expect_that!(ws.vcs(), eq(VcsType::Git));
         expect_that!(ws.exists(), is_false());
 
         let created = ws.ensure().expect("ensure");

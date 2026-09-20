@@ -1,9 +1,5 @@
 use std::path::{Path, PathBuf};
 
-pub const STANDARD_DEFAULT_TOOLS: &[&str] = &[
-    "grep", "find", "ls", "cat", "cp", "mv", "rm", "mkdir", "sh", "bash", "sed", "awk",
-];
-
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct AiwConfig {
     #[serde(default)]
@@ -27,20 +23,6 @@ pub enum ConfigError {
 }
 
 impl AiwConfig {
-    /// Returns the effective list of tools, appending standard Linux tools if `default_tools` is true.
-    pub fn effective_tools(&self) -> Vec<String> {
-        let mut result = self.tools.clone();
-        if self.default_tools {
-            for tool in STANDARD_DEFAULT_TOOLS {
-                let tool_str = (*tool).to_string();
-                if !result.contains(&tool_str) {
-                    result.push(tool_str);
-                }
-            }
-        }
-        result
-    }
-
     /// Loads configuration directly from a specific file path.
     pub fn load_from_path(path: &Path) -> Result<Self, ConfigError> {
         let content = match std::fs::read_to_string(path) {
@@ -161,10 +143,7 @@ mod tests {
         let config = AiwConfig::load_from_path(&config_path).expect("load");
         expect_that!(config.default_tools, is_true());
         expect_that!(config.network, is_true());
-        let eff = config.effective_tools();
-        expect_that!(eff, contains(eq("grep")));
-        expect_that!(eff, contains(eq("find")));
-        expect_that!(eff, contains(eq("ls")));
+        expect_that!(config.tools, is_empty());
     }
 
     #[googletest::test]
@@ -176,6 +155,6 @@ mod tests {
         let config = AiwConfig::load_from_path(&config_path).expect("load");
         expect_that!(config.network, is_false());
         expect_that!(config.default_tools, is_false());
-        expect_that!(config.effective_tools(), elements_are![eq("cargo")]);
+        expect_that!(config.tools, elements_are![eq("cargo")]);
     }
 }
