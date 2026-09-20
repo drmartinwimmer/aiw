@@ -1,28 +1,64 @@
 {
   "$schema": "https://raw.githubusercontent.com/fencesandbox/fence/main/docs/schema/fence.schema.json",
+
+  // Inherit Fence's "code" template, providing baseline permissions for AI coding
+  // agents (standard package registries, public git, LLM APIs, and command safety).
   "extends": "code",
+
   "network": {
+    // Block outbound connections to localhost/loopback to prevent agents from
+    // communicating with or bypassing unauthenticated local services.
     "allowLocalOutbound": false,
+
+    // Specific endpoints required by Google Antigravity (agy). Broad wildcards
+    // such as "*.googleusercontent.com" (which hosts arbitrary user-uploaded content)
+    // and "*.google.com" are deliberately omitted to avoid prompt-injection
+    // data exfiltration or payload retrieval.
     "allowedDomains": [
+      // Cloud Code / Antigravity agent backend APIs
       "cloudcode-pa.googleapis.com",
       "daily-cloudcode-pa.googleapis.com",
       "aicode.googleapis.com",
       "aiplatform.googleapis.com",
+      // Google authentication & OAuth token exchange
       "oauth2.googleapis.com",
       "accounts.google.com"
+      // Note: generativelanguage.googleapis.com is already included in "code" template
     ]
   },
+
   "filesystem": {
     "allowWrite": [
+      // Current project directory
       ".",
+
+      // Subdirectory where aiw provisions isolated Jujutsu workspaces
+      ".workspaces/**",
+
+      // Jujutsu version control state: workspaces live in .workspaces/<name>,
+      // so jj operations must write to the local working copy state (.jj/**)
+      // and the main repository store (../../.jj/**).
       ".jj/**",
       "../../.jj/**",
-      ".workspaces/**",
+
+      // Git backend / collocation: Jujutsu repos backed by Git require write access
+      // to local .git/** and the repository root ../../.git/**.
+      ".git/**",
+      "../../.git/**",
+
+      // Antigravity (agy) configuration, conversation transcripts, and cache
       "~/.gemini/**",
+
+      // OS keyring access for credential storage during agent authentication
       "~/.local/share/keyrings/**"
     ]
   },
+
   "command": {
+    // Silences Fence runtime execution deny warning on systems with multi-call
+    // coreutils binaries (e.g. NixOS or Busybox). On these systems, chroot shares
+    // an inode/binary with essential utilities like cat, head, and tail; denying
+    // chroot at runtime would collaterally block those essential utilities.
     "acceptSharedBinaryCannotRuntimeDeny": [
       "chroot"
     ]

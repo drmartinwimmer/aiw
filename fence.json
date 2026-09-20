@@ -2,12 +2,9 @@
   "$schema": "https://raw.githubusercontent.com/fencesandbox/fence/main/docs/schema/fence.schema.json",
   "extends": "./templates/aiw.json",
   "filesystem": {
+    // Project-specific: allow reading the Nix store for toolchains
     "allowRead": [
       "/nix"
-    ],
-    "allowWrite": [
-      ".git/**",
-      "../../.git/**"
     ]
   }
 }

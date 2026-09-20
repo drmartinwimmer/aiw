@@ -25,7 +25,7 @@ Running autonomous coding agents directly inside your primary working copy carri
 `aiw` provides an **opinionated, zero-friction workflow**:
 
 1. **Jujutsu (`jj`) Workspaces**: Automatically provisions lightweight working copies under `.workspaces/<workspace-name>`, keeping your main working tree pristine.
-2. **Fence Sandbox Containment**: Executes the agent inside a sandbox powered by [Fence](https://github.com/fencesandbox/fence)—a lightweight, container-free sandbox tool that enforces network filtering and filesystem boundaries (backed by Bubblewrap on Linux).
+2. **Fence Sandbox Containment**: Executes the agent inside a sandbox powered by [Fence](https://github.com/fencesandbox/fence)—a lightweight, container-free sandbox tool that enforces network filtering and filesystem boundaries (backed by Bubblewrap and Landlock on Linux, and Seatbelt on macOS).
 3. **Safe Agent Autonomy**: Safely runs agents with execution permissions enabled inside the container (`--dangerously-skip-permissions`), providing full autonomous velocity while guaranteeing strict containment at the OS kernel level.
 4. **Automated `direnv` Support**: Automatically discovers and authorizes `.envrc` in newly spawned workspaces if the root repository has direnv active and allowed, prepending `direnv exec .` inside the sandbox.
 5. **Native `herdr` Integration**: If you run inside a [Herdr](https://github.com/herdr/herdr) terminal multiplexer session, `aiw` automatically creates workspace tabs, focuses them, and reports live agent states.
@@ -34,11 +34,10 @@ Running autonomous coding agents directly inside your primary working copy carri
 
 ## Prerequisites
 
-- **Linux** (for kernel namespace / Bubblewrap sandboxing)
-- **[Fence](https://github.com/fencesandbox/fence)**: Lightweight command sandbox with network and filesystem controls
+- **[Fence](https://github.com/fencesandbox/fence)**: Lightweight command sandbox providing network filtering and filesystem isolation (supports Linux and macOS)
 - **[Jujutsu (`jj`)](https://github.com/martinvonz/jj)**: Version control system for workspace management
 - **AI Agent CLI**: e.g., `agy` (Antigravity CLI)
-- _(Optional)_ **[direnv](https://direnv.net/)**: For directory-based environment variable management
+- _(Optional)_ **[direnv](https://direnv.net/)**: Directory-based environment variable management
 - _(Optional)_ **[Herdr](https://github.com/herdr/herdr)**: Terminal multiplexer with agent status reporting
 
 ---
@@ -133,11 +132,16 @@ This cleans up the Jujutsu workspace registration (`jj workspace forget`) and re
 
 `aiw` uses a clean, two-layer configuration model powered by [Fence](https://github.com/fencesandbox/fence):
 
-### 1. Base AI Workspace Template (`templates/aiw.json`)
+### 1. Global AI Workspace Template (`aiw.json`)
 
-The base template inherits from Fence's built-in `code` template and defines rules common to all `aiw` workspaces:
+The base template inherits from Fence's built-in `code` template and defines rules common to all `aiw` workspaces. Install it to Fence's default configuration path (`~/.config/fence/fence.json` or `~/.config/fence/aiw.json`):
 
-```json
+```bash
+mkdir -p ~/.config/fence
+cp templates/aiw.json ~/.config/fence/fence.json
+```
+
+```jsonc
 {
   "$schema": "https://raw.githubusercontent.com/fencesandbox/fence/main/docs/schema/fence.schema.json",
   "extends": "code",
@@ -149,41 +153,43 @@ The base template inherits from Fence's built-in `code` template and defines rul
       "aicode.googleapis.com",
       "aiplatform.googleapis.com",
       "oauth2.googleapis.com",
-      "accounts.google.com"
-    ]
+      "accounts.google.com",
+    ],
   },
   "filesystem": {
     "allowWrite": [
       ".",
+      ".workspaces/**",
       ".jj/**",
       "../../.jj/**",
-      ".workspaces/**",
+      ".git/**",
+      "../../.git/**",
       "~/.gemini/**",
-      "~/.local/share/keyrings/**"
-    ]
+      "~/.local/share/keyrings/**",
+    ],
   },
   "command": {
-    "acceptSharedBinaryCannotRuntimeDeny": ["chroot"]
-  }
+    "acceptSharedBinaryCannotRuntimeDeny": ["chroot"],
+  },
 }
 ```
 
+- **Zero-Config Repositories**: When installed as `~/.config/fence/fence.json`, Fence discovers it automatically. Standard Jujutsu and Git-backed repositories need no project-level `fence.json` at all.
 - **Scoped Network Access**: Restricts Google API communication strictly to authentication and agent endpoints (`cloudcode-pa.googleapis.com`, `oauth2.googleapis.com`, `accounts.google.com`, etc.) without opening broad wildcards (such as `*.googleusercontent.com` or `*.google.com`).
-- **Jujutsu Workspace Paths**: Grants write access to `.jj/**` in the active workspace and `../../.jj/**` at the repository root where the Jujutsu store lives.
+- **Jujutsu & Git Workspace Paths**: Grants write access to `.jj/**` and `.git/**` in the active workspace, as well as `../../.jj/**` and `../../.git/**` at the repository root where Jujutsu/Git stores live.
 - **Agent Data**: Retains state in `~/.gemini/**` and credentials in `~/.local/share/keyrings/**`.
 
 ### 2. Project-Specific Overrides (`fence.json` or `fence.jsonc`)
 
-Place `fence.json` at your repository root (or in `.workspaces/<name>/`) to add project-specific rules:
+If a repository requires project-specific settings (such as exposing an SDK or custom read/write directory), place `fence.json` at your repository root to extend your global Fence template:
 
-```json
+```jsonc
 {
   "$schema": "https://raw.githubusercontent.com/fencesandbox/fence/main/docs/schema/fence.schema.json",
-  "extends": "./templates/aiw.json",
+  "extends": "$HOME/.config/fence/fence.json",
   "filesystem": {
     "allowRead": ["/nix"],
-    "allowWrite": [".git/**", "../../.git/**"]
-  }
+  },
 }
 ```
 
