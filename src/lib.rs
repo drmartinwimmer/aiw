@@ -3,7 +3,7 @@
 //! Provides workspace management and Fence sandbox execution for AI developer workflows.
 
 mod cli;
-pub use cli::{AppError, run};
+pub use cli::{AppError, Cli};
 
 pub mod direnv;
 pub mod sandbox;

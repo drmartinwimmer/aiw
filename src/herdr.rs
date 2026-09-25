@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use crate::direnv::ensure_user_profile_bin_paths;
 
 #[derive(Debug, thiserror::Error)]
 pub enum HerdrError {
@@ -132,17 +133,24 @@ impl Herdr {
     }
 
     fn execute_cmd(&self, args: &[&str]) -> Result<String, HerdrError> {
-        let mut cmd = Command::new(&self.binary);
-        cmd.args(args);
-        crate::direnv::ensure_user_profile_bin_paths(&mut cmd);
+        let mut attempts = 0;
+        let output = loop {
+            let mut cmd = Command::new(&self.binary);
+            cmd.args(args);
+            ensure_user_profile_bin_paths(&mut cmd);
 
-        let output = cmd.output().map_err(|err| {
-            if err.kind() == std::io::ErrorKind::NotFound {
-                HerdrError::BinaryNotFound(self.binary.to_string_lossy().into_owned())
-            } else {
-                HerdrError::Io(err)
+            match cmd.output() {
+                Ok(out) => break out,
+                Err(err) if attempts < 5 && err.raw_os_error() == Some(26) => {
+                    attempts += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    return Err(HerdrError::BinaryNotFound(self.binary.to_string_lossy().into_owned()));
+                }
+                Err(err) => return Err(HerdrError::Io(err)),
             }
-        })?;
+        };
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -315,7 +323,7 @@ impl Herdr {
         cmd.stdin(std::process::Stdio::inherit())
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit());
-        crate::direnv::ensure_user_profile_bin_paths(&mut cmd);
+        ensure_user_profile_bin_paths(&mut cmd);
 
         let status = cmd.status()?;
         if !status.success() {
@@ -422,12 +430,7 @@ mod tests {
     fn create_mock_script(script_content: &str) -> (tempfile::TempDir, PathBuf) {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let script_path = temp_dir.path().join("mock_herdr.sh");
-        {
-            use std::io::Write;
-            let mut f = std::fs::File::create(&script_path).expect("create mock script");
-            f.write_all(script_content.as_bytes()).expect("write mock script");
-            f.sync_all().expect("sync mock script");
-        }
+        std::fs::write(&script_path, script_content).expect("write mock script");
 
         #[cfg(unix)]
         {
@@ -517,9 +520,9 @@ exit 1
         let res = herdr.create_tab("my-workspace", Some(Path::new("/my/cwd")), true);
         expect_that!(res, ok(anything()));
         let created = res.expect("created tab");
-        expect_that!(created.tab_id.as_str(), eq("w1:t8"));
-        expect_that!(created.root_pane_id.as_str(), eq("w1:p8"));
-        expect_that!(created.label.as_str(), eq("my-workspace"));
+        expect_that!(&created.tab_id, eq("w1:t8"));
+        expect_that!(&created.root_pane_id, eq("w1:p8"));
+        expect_that!(&created.label, eq("my-workspace"));
         expect_that!(created.workspace_id.as_deref(), some(eq("w1")));
     }
 
@@ -564,7 +567,7 @@ exit 0
 
         let logged = std::fs::read_to_string(&log_path).expect("read log");
         expect_that!(
-            logged.as_str(),
+            &logged,
             contains_substring("pane report-agent --source aiw --agent agy --state working w1:p99")
         );
     }
@@ -590,7 +593,7 @@ exit 0
 
         let logged = std::fs::read_to_string(&log_path).expect("read log");
         expect_that!(
-            logged.as_str(),
+            &logged,
             contains_substring("pane run w1:p55 echo hello world")
         );
     }
@@ -628,15 +631,15 @@ exit 0
 
         let logged = std::fs::read_to_string(&log_path).expect("read log");
         expect_that!(
-            logged.as_str(),
+            &logged,
             contains_substring("tab create --label ws-test --focus --cwd /tmp/test")
         );
         expect_that!(
-            logged.as_str(),
+            &logged,
             contains_substring("pane report-agent --source aiw --agent agy --state working w1:p12")
         );
         expect_that!(
-            logged.as_str(),
+            &logged,
             contains_substring("pane run w1:p12 fence -- echo 1")
         );
     }
@@ -673,11 +676,11 @@ exit 0
         let logged = std::fs::read_to_string(&log_path).expect("read log");
         // Must inform Herdr about agent on current pane
         expect_that!(
-            logged.as_str(),
+            &logged,
             contains_substring("pane report-agent --source aiw --agent agy --state working w1:p5")
         );
         // Must NOT create a new tab
-        expect_that!(logged.as_str(), not(contains_substring("tab create")));
+        expect_that!(&logged, not(contains_substring("tab create")));
     }
 
     #[googletest::test]

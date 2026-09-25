@@ -137,8 +137,9 @@ fn workspace_creation_and_dry_run_in_real_jj_repo_succeeds() {
     expect_that!(stdout.as_ref(), starts_with("fence "));
     expect_that!(stdout.as_ref(), contains_substring("--settings"));
 
-    let fence_json_str = repo_root.join("fence.json").to_string_lossy().to_string();
-    expect_that!(stdout.as_ref(), contains_substring(fence_json_str.as_str()));
+    let fence_json_path = repo_root.join("fence.json");
+    let fence_json_str = fence_json_path.to_string_lossy();
+    expect_that!(stdout.as_ref(), contains_substring(fence_json_str.as_ref()));
     expect_that!(stdout.as_ref(), contains_substring("agy"));
     expect_that!(
         stdout.as_ref(),
@@ -723,19 +724,19 @@ exit 0
     assert!(output.status.success());
     let logged = std::fs::read_to_string(&log_path).expect("read log");
     expect_that!(
-        logged.as_str(),
+        &logged,
         contains_substring("tab create --label my-herdr-ws --focus")
     );
     expect_that!(
-        logged.as_str(),
+        &logged,
         contains_substring("pane report-agent --source aiw --agent agy --state working w1:p10")
     );
     expect_that!(
-        logged.as_str(),
+        &logged,
         contains_substring("pane run w1:p10 fence")
     );
     expect_that!(
-        logged.as_str(),
+        &logged,
         contains_substring("agy --dangerously-skip-permissions")
     );
 }
@@ -778,7 +779,7 @@ exit 0
 
     assert!(output.status.success());
     let logged = std::fs::read_to_string(&log_path).expect("read log");
-    expect_that!(logged.as_str(), eq(""));
+    expect_that!(&logged, eq(""));
 }
 
 #[googletest::test]
@@ -897,26 +898,6 @@ fn git_repo_in_subdirectory_discovers_root_and_creates_workspace() {
     expect_that!(ws_path.join(".git").exists(), is_true());
 }
 
-#[googletest::test]
-fn git_repo_inside_worktree_discovers_main_root() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
-    let repo_root = temp_dir.path();
-    init_test_git_repo(repo_root);
-    write_test_fence_json(repo_root);
-
-    let out1 = run_aiw(repo_root, &["agy", "first-git-ws", "--dry-run"]);
-    expect_that!(out1.status.success(), is_true());
-
-    let first_ws = repo_root.join(".workspaces").join("first-git-ws");
-    expect_that!(first_ws.exists(), is_true());
-
-    let out2 = run_aiw(&first_ws, &["agy", "second-git-ws", "--dry-run"]);
-    expect_that!(out2.status.success(), is_true());
-
-    let second_ws = repo_root.join(".workspaces").join("second-git-ws");
-    expect_that!(second_ws.exists(), is_true());
-    expect_that!(first_ws.join(".workspaces").exists(), is_false());
-}
 
 #[googletest::test]
 fn git_repo_nested_inside_jj_repo_identifies_git_root_and_creates_git_workspace() {

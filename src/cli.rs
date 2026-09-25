@@ -1,4 +1,9 @@
 use clap::{Parser, Subcommand};
+use crate::config::{AiwConfig, ConfigError};
+use crate::direnv::Direnv;
+use crate::herdr::{Herdr, HerdrError};
+use crate::sandbox::{SandboxBuilder, SandboxError};
+use crate::workspace::{Workspace, WorkspaceError};
 
 #[derive(Parser, Debug)]
 #[command(name = "aiw", about = "AI Workspace Launcher")]
@@ -12,10 +17,6 @@ impl Cli {
         let cli = Self::parse();
         cli.command.run()
     }
-}
-
-pub fn run() -> Result<(), AppError> {
-    Cli::run()
 }
 
 #[derive(Subcommand, Debug, PartialEq, Eq)]
@@ -44,7 +45,7 @@ struct ForgetCommand {
 impl ForgetCommand {
     fn run(&self) -> Result<(), AppError> {
         let current_dir = std::env::current_dir()?;
-        let workspace = crate::workspace::Workspace::from_dir(&current_dir, &self.workspace_name)?;
+        let workspace = Workspace::from_dir(&current_dir, &self.workspace_name)?;
         workspace.forget()?;
         Ok(())
     }
@@ -76,14 +77,14 @@ impl AgyCommand {
 
     fn run(&self) -> Result<(), AppError> {
         let current_dir = std::env::current_dir()?;
-        let workspace = crate::workspace::Workspace::from_dir(&current_dir, &self.workspace_name)?;
+        let workspace = Workspace::from_dir(&current_dir, &self.workspace_name)?;
         let repo_root = workspace.repo_root();
 
         if repo_root.join("aiw.json").exists() {
-            let _ = crate::config::AiwConfig::find_and_load(repo_root)?;
+            let _ = AiwConfig::find_and_load(repo_root)?;
         }
 
-        let direnv = crate::direnv::Direnv::new(repo_root);
+        let direnv = Direnv::new(repo_root);
         let is_new_workspace = workspace.ensure()?;
 
         if is_new_workspace {
@@ -91,13 +92,13 @@ impl AgyCommand {
         }
 
         let payload = self.build_payload_command();
-        let builder = crate::sandbox::SandboxBuilder::for_workspace(&workspace, &payload)
+        let builder = SandboxBuilder::for_workspace(&workspace, &payload)
             .with_direnv(direnv.is_allowed());
 
         if self.dry_run {
             println!("{builder}");
             Ok(())
-        } else if let Some(herdr) = crate::herdr::Herdr::from_env() {
+        } else if let Some(herdr) = Herdr::from_env() {
             let cmd = format!("{builder}");
             herdr.run_command(
                 &self.workspace_name,
@@ -116,13 +117,13 @@ impl AgyCommand {
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     #[error("{0}")]
-    Workspace(#[from] crate::workspace::WorkspaceError),
+    Workspace(#[from] WorkspaceError),
     #[error("{0}")]
-    Config(#[from] crate::config::ConfigError),
+    Config(#[from] ConfigError),
     #[error("{0}")]
-    Sandbox(#[from] crate::sandbox::SandboxError),
+    Sandbox(#[from] SandboxError),
     #[error("{0}")]
-    Herdr(#[from] crate::herdr::HerdrError),
+    Herdr(#[from] HerdrError),
     #[error("{0}")]
     Io(#[from] std::io::Error),
 }
@@ -136,9 +137,9 @@ mod tests {
     fn parse_agy_subcommand_minimal_succeeds() {
         let cli = Cli::try_parse_from(["aiw", "agy", "my-workspace"]).expect("parse minimal agy");
         if let Commands::Agy(cmd) = cli.command {
-            expect_that!(cmd.workspace_name.as_str(), eq("my-workspace"));
+            expect_that!(&cmd.workspace_name, eq("my-workspace"));
             expect_that!(cmd.dry_run, is_false());
-            expect_that!(cmd.extra_args.as_slice(), is_empty());
+            expect_that!(&cmd.extra_args, is_empty());
         } else {
             expect_that!(false, is_true());
         }
@@ -149,9 +150,9 @@ mod tests {
         let cli = Cli::try_parse_from(["aiw", "agy", "my-workspace", "--dry-run"])
             .expect("parse agy with dry run");
         if let Commands::Agy(cmd) = cli.command {
-            expect_that!(cmd.workspace_name.as_str(), eq("my-workspace"));
+            expect_that!(&cmd.workspace_name, eq("my-workspace"));
             expect_that!(cmd.dry_run, is_true());
-            expect_that!(cmd.extra_args.as_slice(), is_empty());
+            expect_that!(&cmd.extra_args, is_empty());
         } else {
             expect_that!(false, is_true());
         }
@@ -170,9 +171,9 @@ mod tests {
         ])
         .expect("parse agy with extra args");
         if let Commands::Agy(cmd) = cli.command {
-            expect_that!(cmd.workspace_name.as_str(), eq("feature-1"));
+            expect_that!(&cmd.workspace_name, eq("feature-1"));
             expect_that!(cmd.dry_run, is_true());
-            expect_that!(cmd.extra_args.as_slice(), elements_are![eq("--model"), eq("gemini-2.5")]);
+            expect_that!(&cmd.extra_args, elements_are![eq("--model"), eq("gemini-2.5")]);
         } else {
             expect_that!(false, is_true());
         }
@@ -204,7 +205,7 @@ mod tests {
     fn parse_forget_subcommand_succeeds() {
         let cli = Cli::try_parse_from(["aiw", "forget", "old-ws"]).expect("parse forget");
         if let Commands::Forget(cmd) = cli.command {
-            expect_that!(cmd.workspace_name.as_str(), eq("old-ws"));
+            expect_that!(&cmd.workspace_name, eq("old-ws"));
         } else {
             expect_that!(false, is_true());
         }

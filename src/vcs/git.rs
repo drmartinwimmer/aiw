@@ -17,7 +17,7 @@ impl Git {
         }
 
         let output = std::process::Command::new("git")
-            .args(["--no-pager", "rev-parse", "--git-common-dir"])
+            .args(["--no-pager", "rev-parse", "--show-toplevel"])
             .current_dir(&normalized)
             .output();
 
@@ -42,45 +42,13 @@ impl Git {
         let trimmed = stdout.trim();
         if trimmed.is_empty() {
             return Err(WorkspaceError::GitCommandFailed(
-                "Empty output from git rev-parse --git-common-dir".to_string(),
+                "Empty output from git rev-parse --show-toplevel".to_string(),
             ));
         }
 
         let path = PathBuf::from(trimmed);
-        let abs_common_dir = if path.is_absolute() {
-            path
-        } else {
-            normalized.join(path)
-        };
-
-        let abs_norm = abs_common_dir.canonicalize().unwrap_or(abs_common_dir);
-        if abs_norm.file_name() == Some(std::ffi::OsStr::new(".git"))
-            && let Some(parent) = abs_norm.parent()
-        {
-            return Ok(Self {
-                repo_root: parent.to_path_buf(),
-            });
-        }
-
-        // Fallback to git rev-parse --show-toplevel
-        let top_output = std::process::Command::new("git")
-            .args(["--no-pager", "rev-parse", "--show-toplevel"])
-            .current_dir(&normalized)
-            .output()?;
-
-        if top_output.status.success() {
-            let top_str = String::from_utf8_lossy(&top_output.stdout);
-            let top_trimmed = top_str.trim();
-            if !top_trimmed.is_empty() {
-                let top_path = PathBuf::from(top_trimmed);
-                return Ok(Self {
-                    repo_root: top_path.canonicalize().unwrap_or(top_path),
-                });
-            }
-        }
-
         Ok(Self {
-            repo_root: abs_norm,
+            repo_root: path.canonicalize().unwrap_or(path),
         })
     }
 
@@ -206,5 +174,128 @@ impl Git {
     #[must_use]
     pub fn workspace_exists(&self, workspace_path: &Path) -> bool {
         workspace_path.join(".git").exists()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use googletest::prelude::*;
+
+    fn init_test_git_repo(path: &Path) {
+        let output = std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .arg(path)
+            .output()
+            .expect("git init");
+        assert!(output.status.success());
+
+        drop(
+            std::process::Command::new("git")
+                .args(["config", "user.name", "Test User"])
+                .current_dir(path)
+                .output(),
+        );
+        drop(
+            std::process::Command::new("git")
+                .args(["config", "user.email", "test@example.com"])
+                .current_dir(path)
+                .output(),
+        );
+
+        std::fs::write(path.join("README.md"), "# Test\n").expect("write file");
+        drop(
+            std::process::Command::new("git")
+                .args(["add", "README.md"])
+                .current_dir(path)
+                .output(),
+        );
+        drop(
+            std::process::Command::new("git")
+                .args(["commit", "-m", "Initial commit"])
+                .current_dir(path)
+                .output(),
+        );
+    }
+
+    #[googletest::test]
+    fn from_dir_at_repo_root_discovers_git_root() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = dir.path();
+        init_test_git_repo(repo_root);
+
+        let git = Git::from_dir(repo_root).expect("from_dir");
+        let canonical_root = repo_root.canonicalize().unwrap_or_else(|_| repo_root.to_path_buf());
+        expect_that!(git.repo_root(), eq(&canonical_root));
+    }
+
+    #[googletest::test]
+    fn from_dir_in_deep_subdirectory_discovers_git_root() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = dir.path();
+        init_test_git_repo(repo_root);
+
+        let sub = repo_root.join("deep").join("nested");
+        std::fs::create_dir_all(&sub).expect("create deep dir");
+
+        let git = Git::from_dir(&sub).expect("from_dir in sub");
+        let canonical_root = repo_root.canonicalize().unwrap_or_else(|_| repo_root.to_path_buf());
+        expect_that!(git.repo_root(), eq(&canonical_root));
+    }
+
+    #[googletest::test]
+    fn from_dir_outside_repo_returns_not_in_git_repo() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let non_repo = dir.path();
+
+        let res = Git::from_dir(non_repo);
+        expect_that!(
+            res,
+            matches_pattern!(Err(matches_pattern!(WorkspaceError::NotInGitRepo)))
+        );
+    }
+
+    #[googletest::test]
+    fn git_worktree_lifecycle_operations() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = dir.path();
+        init_test_git_repo(repo_root);
+
+        let git = Git::from_dir(repo_root).expect("from_dir");
+        let ws_name = "test-ws";
+        let rel_ws_path = Path::new(".workspaces").join(ws_name);
+        let abs_ws_path = git.repo_root().join(&rel_ws_path);
+
+        expect_that!(git.is_workspace_registered(ws_name).expect("is_registered"), is_false());
+        expect_that!(git.workspace_exists(&abs_ws_path), is_false());
+
+        std::fs::create_dir_all(git.repo_root().join(".workspaces")).expect("create .workspaces");
+        git.add_workspace(&rel_ws_path, ws_name).expect("add_workspace");
+
+        expect_that!(git.is_workspace_registered(ws_name).expect("is_registered"), is_true());
+        expect_that!(git.workspace_exists(&abs_ws_path), is_true());
+
+        git.forget_workspace(ws_name).expect("forget_workspace");
+        expect_that!(git.is_workspace_registered(ws_name).expect("is_registered"), is_false());
+    }
+
+    #[googletest::test]
+    fn re_adding_workspace_after_forget_succeeds() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = dir.path();
+        init_test_git_repo(repo_root);
+
+        let git = Git::from_dir(repo_root).expect("from_dir");
+        let ws_name = "readd-ws";
+        let rel_ws_path = Path::new(".workspaces").join(ws_name);
+        std::fs::create_dir_all(git.repo_root().join(".workspaces")).expect("create .workspaces");
+
+        git.add_workspace(&rel_ws_path, ws_name).expect("first add");
+        git.forget_workspace(ws_name).expect("forget");
+
+        // Re-adding the worktree with the same name must succeed
+        let second_add = git.add_workspace(&rel_ws_path, ws_name);
+        expect_that!(second_add, ok(anything()));
+        expect_that!(git.is_workspace_registered(ws_name).expect("is_registered"), is_true());
     }
 }

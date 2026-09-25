@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
+use crate::direnv::ensure_user_profile_bin_paths;
 use crate::workspace::Workspace;
 
 #[derive(Debug, thiserror::Error)]
@@ -110,7 +111,7 @@ impl<'a> SandboxBuilder<'a> {
         self.append_direnv_args(&mut cmd)?;
         cmd.args(self.command);
 
-        crate::direnv::ensure_user_profile_bin_paths(&mut cmd);
+        ensure_user_profile_bin_paths(&mut cmd);
 
         // In environments where TMPDIR points to a non-existent directory, fallback to /tmp
         if let Ok(tmp) = std::env::var("TMPDIR")
@@ -199,11 +200,11 @@ mod tests {
 
         let fence_str = fence_json.display().to_string();
         expect_that!(
-            args.as_slice(),
+            &args[..],
             contains_subslice(&["--settings", &fence_str])
         );
         expect_that!(
-            args.as_slice(),
+            &args[..],
             contains_subslice(&["--", "agy", "--dangerously-skip-permissions"])
         );
     }
@@ -226,7 +227,7 @@ mod tests {
 
         let ws_fence_str = ws_fence.display().to_string();
         expect_that!(
-            args.as_slice(),
+            &args[..],
             contains_subslice(&["--settings", &ws_fence_str])
         );
     }
@@ -243,11 +244,11 @@ mod tests {
         let args = builder.build_args().expect("build_args");
 
         expect_that!(
-            args.as_slice(),
+            &args[..],
             contains_subslice(&["--template", "code"])
         );
         expect_that!(
-            args.as_slice(),
+            &args[..],
             contains_subslice(&["--", "agy", "--dangerously-skip-permissions"])
         );
     }
@@ -269,7 +270,7 @@ mod tests {
 
         let custom_str = custom_fence.display().to_string();
         expect_that!(
-            args.as_slice(),
+            &args[..],
             contains_subslice(&["--settings", &custom_str])
         );
     }
@@ -287,7 +288,7 @@ mod tests {
         let args = builder.build_args().expect("build_args");
 
         expect_that!(
-            args.as_slice(),
+            &args[..],
             contains_subslice(&[
                 "--",
                 "direnv",
@@ -312,7 +313,7 @@ mod tests {
         let args = builder.build_args().expect("build_args");
 
         expect_that!(
-            args.as_slice(),
+            &args[..],
             contains_subslice(&["--", "direnv", "exec", ".", "sh", "-c", "echo ok"])
         );
     }
@@ -379,10 +380,10 @@ mod tests {
 
         let formatted = format!("{builder}");
         expect_that!(
-            formatted.as_str(),
+            &formatted,
             eq("fence --template code -- direnv exec . sh -c echo hi")
         );
-        expect_that!(builder.to_string().as_str(), eq(formatted.as_str()));
+        expect_that!(&builder.to_string(), eq(&formatted));
     }
 
     #[googletest::test]
@@ -409,7 +410,7 @@ mod tests {
         expect_that!(cmd.get_current_dir(), some(eq(ws.path())));
         let formatted = format!("{builder}");
         expect_that!(
-            formatted.as_str(),
+            &formatted,
             contains_substring("direnv exec . agy --dangerously-skip-permissions --extra-flag")
         );
     }
