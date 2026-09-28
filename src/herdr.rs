@@ -133,24 +133,17 @@ impl Herdr {
     }
 
     fn execute_cmd(&self, args: &[&str]) -> Result<String, HerdrError> {
-        let mut attempts = 0;
-        let output = loop {
-            let mut cmd = Command::new(&self.binary);
-            cmd.args(args);
-            ensure_user_profile_bin_paths(&mut cmd);
+        let mut cmd = Command::new(&self.binary);
+        cmd.args(args);
+        ensure_user_profile_bin_paths(&mut cmd);
 
-            match cmd.output() {
-                Ok(out) => break out,
-                Err(err) if attempts < 5 && err.raw_os_error() == Some(26) => {
-                    attempts += 1;
-                    std::thread::sleep(std::time::Duration::from_millis(5));
-                }
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                    return Err(HerdrError::BinaryNotFound(self.binary.to_string_lossy().into_owned()));
-                }
-                Err(err) => return Err(HerdrError::Io(err)),
+        let output = cmd.output().map_err(|err| {
+            if err.kind() == std::io::ErrorKind::NotFound {
+                HerdrError::BinaryNotFound(self.binary.to_string_lossy().into_owned())
+            } else {
+                HerdrError::Io(err)
             }
-        };
+        })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
