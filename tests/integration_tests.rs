@@ -222,10 +222,9 @@ fn live_fence_execution_in_temp_workspace_runs_and_verifies_containment() {
     // Invoke live container execution forwarding `--version` to agy inside fence
     let output = run_aiw(repo_root, &["agy", "live-workspace", "--", "--version"]);
 
-    expect_that!(output.status.success(), is_true());
-
     let stdout = String::from_utf8_lossy(&output.stdout);
-    expect_that!(stdout.trim().is_empty(), is_false());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stdout.trim().is_empty(), "run_aiw stdout was empty! exit_code={:?}, stdout={}, stderr={}", output.status.code(), stdout, stderr);
 
     let ws_path = repo_root.join(".workspaces").join("live-workspace");
     expect_that!(ws_path.exists(), is_true());
@@ -273,7 +272,12 @@ fn jj_commands_in_fence_sandbox_execute_successfully_and_persist_commits() {
     let mut new_cmd = builder2.build_command().expect("build_command");
     let new_output = new_cmd.output().expect("execute fence jj new");
 
-    expect_that!(new_output.status.success(), is_true());
+    assert!(
+        new_output.status.success(),
+        "fence jj new failed: stdout={}, stderr={}",
+        String::from_utf8_lossy(&new_output.stdout),
+        String::from_utf8_lossy(&new_output.stderr)
+    );
 
     // Verify change is recorded and visible to host jj
     let log_output = Command::new("jj")

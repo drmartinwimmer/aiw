@@ -32,6 +32,7 @@
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
           nativeCheckInputs = [
+            pkgs.git
             pkgs.jujutsu
             pkgs.fence
             pkgs.bubblewrap
