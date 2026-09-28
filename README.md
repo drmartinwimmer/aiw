@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Built with Rust](https://img.shields.io/badge/rust-2024%20edition-orange.svg)](https://www.rust-lang.org/)
 
-**AI Workspace** (`aiw`) streamlines running autonomous AI coding agents (such as Google Antigravity / `agy`) in dedicated, secure, and isolated development environments. It pairs the branchless workflow of [Jujutsu (`jj`)](https://github.com/martinvonz/jj) workspaces with OS-level containment powered by [Fence](https://github.com/fencesandbox/fence), automatic [direnv](https://direnv.net/) environment propagation, and seamless [Herdr](https://github.com/herdr/herdr) multiplexer integration.
+**AI Workspace** (`aiw`) streamlines running autonomous AI coding agents (such as Google Antigravity / `agy`) in dedicated, secure, and isolated development environments. It pairs the isolated workflow of [Jujutsu (`jj`)](https://github.com/martinvonz/jj) workspaces and [Git](https://git-scm.com/) worktrees with OS-level containment powered by [Fence](https://github.com/fencesandbox/fence), automatic [direnv](https://direnv.net/) environment propagation, and seamless [Herdr](https://github.com/herdr/herdr) multiplexer integration.
 
 ---
 
@@ -24,7 +24,7 @@ Running autonomous coding agents directly inside your primary working copy carri
 
 `aiw` provides an **opinionated, zero-friction workflow**:
 
-1. **Jujutsu (`jj`) Workspaces**: Automatically provisions lightweight working copies under `.workspaces/<workspace-name>`, keeping your main working tree pristine.
+1. **Isolated Workspaces (Jujutsu & Git)**: Automatically provisions lightweight working copies under `.workspaces/<workspace-name>` using `jj workspace add` (for Jujutsu repositories) or `git worktree add` (for Git repositories), keeping your primary working tree pristine.
 2. **Fence Sandbox Containment**: Executes the agent inside a sandbox powered by [Fence](https://github.com/fencesandbox/fence)—a lightweight, container-free sandbox tool that enforces network filtering and filesystem boundaries (backed by Bubblewrap and Landlock on Linux, and Seatbelt on macOS).
 3. **Safe Agent Autonomy**: Safely runs agents with execution permissions enabled inside the container (`--dangerously-skip-permissions`), providing full autonomous velocity while guaranteeing strict containment at the OS kernel level.
 4. **Automated `direnv` Support**: Automatically discovers and authorizes `.envrc` in newly spawned workspaces if the root repository has direnv active and allowed, prepending `direnv exec .` inside the sandbox.
@@ -35,7 +35,7 @@ Running autonomous coding agents directly inside your primary working copy carri
 ## Prerequisites
 
 - **[Fence](https://github.com/fencesandbox/fence)**: Lightweight command sandbox providing network filtering and filesystem isolation (supports Linux and macOS)
-- **[Jujutsu (`jj`)](https://github.com/martinvonz/jj)**: Version control system for workspace management
+- **[Jujutsu (`jj`)](https://github.com/martinvonz/jj)** or **[Git](https://git-scm.com/)**: Version control system for workspace management (`aiw` automatically detects whether your project uses Jujutsu or Git)
 - **AI Agent CLI**: e.g., `agy` (Antigravity CLI)
 - _(Optional)_ **[direnv](https://direnv.net/)**: Directory-based environment variable management
 - _(Optional)_ **[Herdr](https://github.com/herdr/herdr)**: Terminal multiplexer with agent status reporting
@@ -90,7 +90,7 @@ aiw agy feature-login
 
 This command:
 
-- Checks for an existing workspace named `feature-login` or creates `.workspaces/feature-login` via `jj workspace add`.
+- Checks for an existing workspace named `feature-login` or provisions `.workspaces/feature-login` using `jj workspace add` (in Jujutsu repositories) or `git worktree add` (in Git repositories).
 - Authorizes and activates `direnv` if active in the repository root.
 - Wraps the agent inside `fence` using root or workspace settings.
 - Automatically handles tab creation and agent reporting if running inside Herdr.
@@ -125,7 +125,7 @@ When work in a workspace is completed and merged, forget and delete it:
 aiw forget <workspace-name>
 ```
 
-This cleans up the Jujutsu workspace registration (`jj workspace forget`) and removes `.workspaces/<workspace-name>` from disk.
+This cleans up the workspace registration (`jj workspace forget` for Jujutsu or `git worktree remove` for Git) and removes `.workspaces/<workspace-name>` from disk.
 
 ### 5. Initialize Configuration
 
