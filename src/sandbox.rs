@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
+#[cfg(not(test))]
+use crate::config::ConfigInitializer;
 use crate::direnv::ensure_user_profile_bin_paths;
 use crate::workspace::Workspace;
 
@@ -130,15 +132,9 @@ impl<'a> SandboxBuilder<'a> {
         {
             let mut candidates = Vec::new();
 
-            // 1. User configuration directory ($XDG_CONFIG_HOME/aiw/fence.jsonc or ~/.config/aiw/fence.jsonc)
-            if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
-                && !xdg.is_empty()
-            {
-                candidates.push(PathBuf::from(xdg).join("aiw").join("fence.jsonc"));
-            } else if let Ok(home) = std::env::var("HOME")
-                && !home.is_empty()
-            {
-                candidates.push(PathBuf::from(home).join(".config").join("aiw").join("fence.jsonc"));
+            // 1. User configuration directory
+            if let Some(user_config) = ConfigInitializer::user_config_path() {
+                candidates.push(user_config);
             }
 
             // 2. System / package data directories ($XDG_DATA_DIRS/.../aiw/fence.jsonc)

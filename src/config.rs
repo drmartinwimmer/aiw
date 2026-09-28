@@ -12,20 +12,11 @@ pub enum ConfigInitError {
 pub struct ConfigInitializer;
 
 impl ConfigInitializer {
-    /// Returns the canonical user config path ($XDG_CONFIG_HOME/aiw/fence.jsonc or ~/.config/aiw/fence.jsonc).
+    /// Returns the canonical user config path (e.g. ~/.config/aiw/fence.jsonc).
     #[must_use]
     pub fn user_config_path() -> Option<PathBuf> {
-        if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
-            && !xdg.is_empty()
-        {
-            Some(PathBuf::from(xdg).join("aiw").join("fence.jsonc"))
-        } else if let Ok(home) = std::env::var("HOME")
-            && !home.is_empty()
-        {
-            Some(PathBuf::from(home).join(".config").join("aiw").join("fence.jsonc"))
-        } else {
-            None
-        }
+        directories::ProjectDirs::from("", "", "aiw")
+            .map(|proj| proj.config_dir().join("fence.jsonc"))
     }
 
     /// Initializes user configuration (~/.config/aiw/fence.jsonc) if it does not exist yet (or if force is true).

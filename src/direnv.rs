@@ -11,13 +11,14 @@ pub(crate) fn ensure_user_profile_bin_paths(cmd: &mut Command) {
     let mut paths: Vec<PathBuf> = std::env::split_paths(&path_var).collect();
     let mut updated = false;
 
-    if let Ok(home) = std::env::var("HOME") {
-        let local_bin = PathBuf::from(&home).join(".local/bin");
+    if let Some(base_dirs) = directories::BaseDirs::new() {
+        let home = base_dirs.home_dir();
+        let local_bin = home.join(".local/bin");
         if local_bin.exists() && !paths.contains(&local_bin) {
             paths.insert(0, local_bin);
             updated = true;
         }
-        let nix_bin = PathBuf::from(&home).join(".nix-profile/bin");
+        let nix_bin = home.join(".nix-profile/bin");
         if nix_bin.exists() && !paths.contains(&nix_bin) {
             paths.push(nix_bin);
             updated = true;

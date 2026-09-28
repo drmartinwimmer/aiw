@@ -974,7 +974,7 @@ fn aiw_config_init_defaults_to_project_and_user_subcommand_inits_user() {
     let user_config = mock_config.join("aiw").join("fence.jsonc");
     let project_config = repo_root.join("fence.jsonc");
 
-    // 1. `config init` without subcommand defaults to project only
+    // 1. `config init` without subcommand defaults to project only, silent on success
     let output1 = Command::new(env!("CARGO_BIN_EXE_aiw"))
         .args(["config", "init"])
         .current_dir(&repo_root)
@@ -984,12 +984,13 @@ fn aiw_config_init_defaults_to_project_and_user_subcommand_inits_user() {
 
     expect_that!(output1.status.success(), is_true());
     let stdout1 = String::from_utf8_lossy(&output1.stdout);
-    expect_that!(stdout1.as_ref(), not(contains_substring("Initialized user configuration")));
-    expect_that!(stdout1.as_ref(), contains_substring("Initialized project configuration"));
+    let stderr1 = String::from_utf8_lossy(&output1.stderr);
+    expect_that!(stdout1.as_ref(), eq(""));
+    expect_that!(stderr1.as_ref(), eq(""));
     expect_that!(user_config.exists(), is_false());
     expect_that!(project_config.exists(), is_true());
 
-    // 2. Second run without --force reports existing and does not overwrite
+    // 2. Second run without --force reports warning on stderr and does not overwrite
     let output2 = Command::new(env!("CARGO_BIN_EXE_aiw"))
         .args(["config", "init"])
         .current_dir(&repo_root)
@@ -999,9 +1000,12 @@ fn aiw_config_init_defaults_to_project_and_user_subcommand_inits_user() {
 
     expect_that!(output2.status.success(), is_true());
     let stdout2 = String::from_utf8_lossy(&output2.stdout);
-    expect_that!(stdout2.as_ref(), contains_substring("Project configuration already exists"));
+    let stderr2 = String::from_utf8_lossy(&output2.stderr);
+    expect_that!(stdout2.as_ref(), eq(""));
+    expect_that!(stderr2.as_ref(), contains_substring("Project configuration already exists"));
+    expect_that!(stderr2.as_ref(), contains_substring("No files written"));
 
-    // 3. `config init user` initializes only user configuration
+    // 3. `config init user` initializes only user configuration, silent on success
     let output_user = Command::new(env!("CARGO_BIN_EXE_aiw"))
         .args(["config", "init", "user"])
         .current_dir(&repo_root)
@@ -1011,11 +1015,12 @@ fn aiw_config_init_defaults_to_project_and_user_subcommand_inits_user() {
 
     expect_that!(output_user.status.success(), is_true());
     let stdout_user = String::from_utf8_lossy(&output_user.stdout);
-    expect_that!(stdout_user.as_ref(), contains_substring("Initialized user configuration"));
-    expect_that!(stdout_user.as_ref(), not(contains_substring("Initialized project configuration")));
+    let stderr_user = String::from_utf8_lossy(&output_user.stderr);
+    expect_that!(stdout_user.as_ref(), eq(""));
+    expect_that!(stderr_user.as_ref(), eq(""));
     expect_that!(user_config.exists(), is_true());
 
-    // 4. Run `config init user` again without --force reports existing
+    // 4. Run `config init user` again without --force reports warning on stderr
     let output_user2 = Command::new(env!("CARGO_BIN_EXE_aiw"))
         .args(["config", "init", "user"])
         .current_dir(&repo_root)
@@ -1025,9 +1030,12 @@ fn aiw_config_init_defaults_to_project_and_user_subcommand_inits_user() {
 
     expect_that!(output_user2.status.success(), is_true());
     let stdout_user2 = String::from_utf8_lossy(&output_user2.stdout);
-    expect_that!(stdout_user2.as_ref(), contains_substring("User configuration already exists"));
+    let stderr_user2 = String::from_utf8_lossy(&output_user2.stderr);
+    expect_that!(stdout_user2.as_ref(), eq(""));
+    expect_that!(stderr_user2.as_ref(), contains_substring("User configuration already exists"));
+    expect_that!(stderr_user2.as_ref(), contains_substring("No files written"));
 
-    // 5. Run with --force overwrites
+    // 5. Run with --force overwrites silently on success
     let output3 = Command::new(env!("CARGO_BIN_EXE_aiw"))
         .args(["config", "init", "--force", "project"])
         .current_dir(&repo_root)
@@ -1037,5 +1045,8 @@ fn aiw_config_init_defaults_to_project_and_user_subcommand_inits_user() {
 
     expect_that!(output3.status.success(), is_true());
     let stdout3 = String::from_utf8_lossy(&output3.stdout);
-    expect_that!(stdout3.as_ref(), contains_substring("Initialized project configuration"));
+    let stderr3 = String::from_utf8_lossy(&output3.stderr);
+    expect_that!(stdout3.as_ref(), eq(""));
+    expect_that!(stderr3.as_ref(), eq(""));
+    expect_that!(project_config.exists(), is_true());
 }
