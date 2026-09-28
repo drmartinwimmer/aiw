@@ -10,6 +10,6 @@ pub mod direnv;
 pub mod sandbox;
 pub mod workspace;
 
-pub use config::{ConfigInitError, ConfigInitializer, DEFAULT_AIW_TEMPLATE};
+pub use config::{ConfigInitError, ConfigInitStatus, ConfigInitializer, DEFAULT_AIW_TEMPLATE};
 pub(crate) mod herdr;
 pub(crate) mod vcs;

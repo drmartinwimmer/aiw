@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use directories::BaseDirs;
+
 /// Ensures user profile binary paths (such as Nix user, home-manager, and local bin profiles)
 /// are present in PATH so that commands can locate tools like direnv and fence.
 pub(crate) fn ensure_user_profile_bin_paths(cmd: &mut Command) {
@@ -11,7 +13,7 @@ pub(crate) fn ensure_user_profile_bin_paths(cmd: &mut Command) {
     let mut paths: Vec<PathBuf> = std::env::split_paths(&path_var).collect();
     let mut updated = false;
 
-    if let Some(base_dirs) = directories::BaseDirs::new() {
+    if let Some(base_dirs) = BaseDirs::new() {
         let home = base_dirs.home_dir();
         let local_bin = home.join(".local/bin");
         if local_bin.exists() && !paths.contains(&local_bin) {

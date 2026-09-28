@@ -1,5 +1,7 @@
+use std::path::Path;
+
 use clap::{Parser, Subcommand};
-use crate::config::{ConfigInitError, ConfigInitializer};
+use crate::config::{ConfigInitError, ConfigInitStatus, ConfigInitializer};
 use crate::direnv::Direnv;
 use crate::herdr::{Herdr, HerdrError};
 use crate::sandbox::{SandboxBuilder, SandboxError};
@@ -161,6 +163,13 @@ struct ConfigInitProjectSubcommand {
     force: bool,
 }
 
+fn warn_already_exists(kind: &str, path: &Path) {
+    eprintln!(
+        "Warning: {kind} configuration already exists: {}. No files written. Use --force to overwrite existing configurations.",
+        path.display()
+    );
+}
+
 impl ConfigInitProjectSubcommand {
     fn run(&self, global_force: bool) -> Result<(), AppError> {
         let force = self.force || global_force;
@@ -170,16 +179,8 @@ impl ConfigInitProjectSubcommand {
             .unwrap_or(current_dir);
 
         match ConfigInitializer::init_project_config(&project_dir, force)? {
-            Some(_path) => {}
-            None => {
-                eprintln!(
-                    "Warning: Project configuration already exists: {}",
-                    project_dir.join("fence.jsonc").display()
-                );
-                if !force {
-                    eprintln!("No files written. Use --force to overwrite existing configurations.");
-                }
-            }
+            ConfigInitStatus::Created(_) => {}
+            ConfigInitStatus::AlreadyExists(path) => warn_already_exists("Project", &path),
         }
         Ok(())
     }
@@ -196,15 +197,8 @@ impl ConfigInitUserSubcommand {
     fn run(&self, global_force: bool) -> Result<(), AppError> {
         let force = self.force || global_force;
         match ConfigInitializer::init_user_config(force)? {
-            Some(_path) => {}
-            None => {
-                if let Some(path) = ConfigInitializer::user_config_path() {
-                    eprintln!("Warning: User configuration already exists: {}", path.display());
-                }
-                if !force {
-                    eprintln!("No files written. Use --force to overwrite existing configurations.");
-                }
-            }
+            ConfigInitStatus::Created(_) => {}
+            ConfigInitStatus::AlreadyExists(path) => warn_already_exists("User", &path),
         }
         Ok(())
     }
