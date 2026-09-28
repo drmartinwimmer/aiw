@@ -76,50 +76,61 @@ fn init_test_jj_repo(path: &Path) {
     }
 }
 
+fn can_run_fence() -> bool {
+    if which::which("fence").is_err() {
+        return false;
+    }
+    Command::new("fence")
+        .args(["--", "true"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 fn write_test_fence_json(repo_root: &Path) {
     let tpl_dir = repo_root.join("templates");
     std::fs::create_dir_all(&tpl_dir).expect("create templates dir");
     let tpl_content = r#"{
-  "extends": "code",
-  "network": {
-    "allowLocalOutbound": false,
-    "allowedDomains": [
-      "cloudcode-pa.googleapis.com",
-      "daily-cloudcode-pa.googleapis.com",
-      "aicode.googleapis.com",
-      "aiplatform.googleapis.com",
-      "oauth2.googleapis.com",
-      "accounts.google.com"
-    ]
+  "$schema": "https://raw.githubusercontent.com/fencesandbox/fence/main/docs/schema/fence.schema.json",
+  "command": {
+    "acceptSharedBinaryCannotRuntimeDeny": ["chroot"]
   },
+  "extends": "code",
   "filesystem": {
     "allowWrite": [
       ".",
-      ".jj/**",
+      "../../.git/**",
       "../../.jj/**",
+      ".git/**",
+      ".jj/**",
       ".workspaces/**",
       "~/.gemini/**",
       "~/.local/share/**",
       "~/.local/share/keyrings/**"
     ]
   },
-  "command": {
-    "acceptSharedBinaryCannotRuntimeDeny": ["chroot"]
-  }
-}"#;
-    std::fs::write(tpl_dir.join("aiw.json"), tpl_content).expect("write templates/aiw.json");
-
-    let fence_content = r#"{
-  "extends": "./templates/aiw.json",
-  "filesystem": {
-    "allowRead": ["/nix"],
-    "allowWrite": [
-      ".git/**",
-      "../../.git/**"
+  "network": {
+    "allowLocalOutbound": false,
+    "allowedDomains": [
+      "accounts.google.com",
+      "aicode.googleapis.com",
+      "aiplatform.googleapis.com",
+      "cloudcode-pa.googleapis.com",
+      "daily-cloudcode-pa.googleapis.com",
+      "oauth2.googleapis.com"
     ]
   }
 }"#;
-    std::fs::write(repo_root.join("fence.json"), fence_content).expect("write fence.json");
+    std::fs::write(tpl_dir.join("aiw.jsonc"), tpl_content).expect("write templates/aiw.jsonc");
+
+    let fence_content = r#"{
+  "$schema": "https://raw.githubusercontent.com/fencesandbox/fence/main/docs/schema/fence.schema.json",
+  "extends": "./templates/aiw.jsonc",
+  "filesystem": {
+    "allowRead": ["/nix"]
+  }
+}"#;
+    std::fs::write(repo_root.join("fence.jsonc"), fence_content).expect("write fence.jsonc");
 }
 
 fn run_aiw(cwd: &Path, args: &[&str]) -> Output {
@@ -148,9 +159,8 @@ fn workspace_creation_and_dry_run_in_real_jj_repo_succeeds() {
     expect_that!(stdout.as_ref(), starts_with("fence "));
     expect_that!(stdout.as_ref(), contains_substring("--settings"));
 
-    let fence_json_path = repo_root.join("fence.json");
-    let fence_json_str = fence_json_path.to_string_lossy();
-    expect_that!(stdout.as_ref(), contains_substring(fence_json_str.as_ref()));
+    let fence_json_str = repo_root.join("fence.jsonc").to_string_lossy().to_string();
+    expect_that!(stdout.as_ref(), contains_substring(fence_json_str.as_str()));
     expect_that!(stdout.as_ref(), contains_substring("agy"));
     expect_that!(
         stdout.as_ref(),
@@ -209,8 +219,8 @@ fn missing_jj_repository_fails_with_clear_error() {
 
 #[googletest::test]
 fn live_fence_execution_in_temp_workspace_runs_and_verifies_containment() {
-    if which::which("fence").is_err() || which::which("agy").is_err() || !can_run_fence() {
-        eprintln!("Skipping live_fence_execution test: fence cannot execute in this environment");
+    if !can_run_fence() || which::which("agy").is_err() {
+        eprintln!("Skipping live_fence_execution test: fence sandbox or agy unavailable in this environment");
         return;
     }
 
@@ -234,8 +244,8 @@ fn live_fence_execution_in_temp_workspace_runs_and_verifies_containment() {
 
 #[googletest::test]
 fn jj_commands_in_fence_sandbox_execute_successfully_and_persist_commits() {
-    if which::which("fence").is_err() || which::which("jj").is_err() || !can_run_fence() {
-        eprintln!("Skipping jj_commands_in_fence_sandbox test: fence cannot execute in this environment");
+    if !can_run_fence() || which::which("jj").is_err() {
+        eprintln!("Skipping jj_commands_in_fence_sandbox test: fence sandbox or jj unavailable in this environment");
         return;
     }
 
@@ -381,8 +391,8 @@ fn recreating_forgotten_workspace_calls_direnv_allow() {
 
 #[googletest::test]
 fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
-    if which::which("fence").is_err() || which::which("direnv").is_err() || !can_run_fence() {
-        eprintln!("Skipping sandbox_command_runs_in_correct_working_directory_and_loads_direnv: fence cannot execute in this environment");
+    if !can_run_fence() || which::which("direnv").is_err() {
+        eprintln!("Skipping sandbox_command_runs_in_correct_working_directory_and_loads_direnv: fence sandbox or direnv unavailable in this environment");
         return;
     }
 
@@ -935,3 +945,31 @@ fn git_repo_nested_inside_jj_repo_identifies_git_root_and_creates_git_workspace(
     expect_that!(outer_jj.join(".workspaces").exists(), is_false());
 }
 
+#[googletest::test]
+fn workspace_without_fence_json_defaults_to_shared_template() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let repo_root = temp_dir.path().join("repo");
+    init_test_jj_repo(&repo_root);
+
+    // Setup mock XDG_CONFIG_HOME
+    let mock_config = temp_dir.path().join("config");
+    let tpl_dir = mock_config.join("fence").join("templates");
+    std::fs::create_dir_all(&tpl_dir).expect("create tpl dir");
+    std::fs::write(tpl_dir.join("aiw.jsonc"), r#"{"extends": "code"}"#).expect("write aiw.jsonc");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_aiw"))
+        .args(["agy", "auto-ws", "--dry-run"])
+        .current_dir(&repo_root)
+        .env("XDG_CONFIG_HOME", &mock_config)
+        .output()
+        .expect("run aiw");
+
+    expect_that!(output.status.success(), is_true());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let expected_tpl = tpl_dir.join("aiw.jsonc").to_string_lossy().to_string();
+    let expected_arg = format!("--settings {expected_tpl}");
+    expect_that!(
+        stdout.as_ref(),
+        contains_substring(expected_arg.as_str())
+    );
+}

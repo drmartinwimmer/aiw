@@ -23,6 +23,8 @@ pub struct SandboxBuilder<'a> {
     command: &'a [String],
     settings_path: Option<&'a Path>,
     use_direnv: bool,
+    #[cfg(test)]
+    shared_config_dir: Option<PathBuf>,
 }
 
 impl<'a> SandboxBuilder<'a> {
@@ -35,6 +37,8 @@ impl<'a> SandboxBuilder<'a> {
             command,
             settings_path: None,
             use_direnv: false,
+            #[cfg(test)]
+            shared_config_dir: None,
         }
     }
 
@@ -64,6 +68,14 @@ impl<'a> SandboxBuilder<'a> {
         self.with_direnv(use_direnv)
     }
 
+    /// Overrides the shared configuration directory for test isolation.
+    #[cfg(test)]
+    #[must_use]
+    pub fn with_shared_config_dir(mut self, dir: PathBuf) -> Self {
+        self.shared_config_dir = Some(dir);
+        self
+    }
+
     fn append_settings_args(&self, cmd: &mut Command) {
         if let Some(settings) = self.resolve_settings_path() {
             cmd.args(["--settings", &settings.to_string_lossy()]);
@@ -90,14 +102,71 @@ impl<'a> SandboxBuilder<'a> {
             return Some(path.to_path_buf());
         }
 
-        let candidates = [
+        let local_candidates = [
             self.workspace_path.join("fence.jsonc"),
             self.workspace_path.join("fence.json"),
             self.repo_root.join("fence.jsonc"),
             self.repo_root.join("fence.json"),
         ];
 
-        candidates.into_iter().find(|p| p.exists())
+        if let Some(path) = local_candidates.into_iter().find(|p| p.exists()) {
+            return Some(path);
+        }
+
+        self.shared_template_candidates().into_iter().find(|p| p.exists())
+    }
+
+    fn shared_template_candidates(&self) -> Vec<PathBuf> {
+        #[cfg(test)]
+        {
+            if let Some(ref dir) = self.shared_config_dir {
+                vec![
+                    dir.join("templates").join("aiw.jsonc"),
+                    dir.join("templates").join("aiw.json"),
+                    dir.join("aiw.jsonc"),
+                    dir.join("aiw.json"),
+                ]
+            } else {
+                Vec::new()
+            }
+        }
+
+        #[cfg(not(test))]
+        {
+            let mut candidates = Vec::new();
+
+            // 1. User configuration directory ($XDG_CONFIG_HOME or ~/.config)
+            let mut config_dirs = Vec::new();
+            if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
+                && !xdg.is_empty()
+            {
+                config_dirs.push(PathBuf::from(xdg).join("fence"));
+            } else if let Ok(home) = std::env::var("HOME")
+                && !home.is_empty()
+            {
+                config_dirs.push(PathBuf::from(home).join(".config").join("fence"));
+            }
+
+            for dir in config_dirs {
+                candidates.push(dir.join("templates").join("aiw.jsonc"));
+                candidates.push(dir.join("templates").join("aiw.json"));
+                candidates.push(dir.join("aiw.jsonc"));
+                candidates.push(dir.join("aiw.json"));
+            }
+
+            // 2. System data directories ($XDG_DATA_DIRS or Nix/system shares)
+            if let Ok(data_dirs) = std::env::var("XDG_DATA_DIRS") {
+                for data_dir in data_dirs.split(':').filter(|s| !s.is_empty()) {
+                    let p = Path::new(data_dir);
+                    candidates.push(p.join("fence/templates/aiw.jsonc"));
+                    candidates.push(p.join("fence/templates/aiw.json"));
+                    candidates.push(p.join("aiw/templates/aiw.jsonc"));
+                    candidates.push(p.join("aiw/templates/aiw.json"));
+                }
+            }
+
+            candidates
+        }
     }
 
     fn construct_command(&self) -> Result<Command, SandboxError> {
@@ -244,6 +313,59 @@ mod tests {
         expect_that!(
             &args[..],
             elements_are![eq("--"), eq("agy"), eq("--dangerously-skip-permissions")]
+        );
+    }
+
+    #[googletest::test]
+    fn build_args_discovers_shared_template_when_no_local_fence_config_exists() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = temp_dir.path().join("repo");
+        let workspace_path = repo_root.join(".workspaces").join("ws");
+        let shared_dir = temp_dir.path().join("shared");
+        let shared_tpl_dir = shared_dir.join("templates");
+        std::fs::create_dir_all(&workspace_path).expect("create ws");
+        std::fs::create_dir_all(&shared_tpl_dir).expect("create shared tpl");
+
+        let shared_template = shared_tpl_dir.join("aiw.jsonc");
+        std::fs::write(&shared_template, r#"{"extends": "code"}"#).expect("write shared template");
+
+        let cmd = vec!["agy".to_string()];
+        let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd)
+            .with_shared_config_dir(shared_dir);
+        let args = builder.build_args().expect("build_args");
+
+        let tpl_str = shared_template.display().to_string();
+        expect_that!(
+            args.as_slice(),
+            contains_subslice(&["--settings", &tpl_str])
+        );
+    }
+
+    #[googletest::test]
+    fn build_args_local_fence_config_takes_precedence_over_shared_template() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = temp_dir.path().join("repo");
+        let workspace_path = repo_root.join(".workspaces").join("ws");
+        let shared_dir = temp_dir.path().join("shared");
+        let shared_tpl_dir = shared_dir.join("templates");
+        std::fs::create_dir_all(&workspace_path).expect("create ws");
+        std::fs::create_dir_all(&shared_tpl_dir).expect("create shared tpl");
+
+        let shared_template = shared_tpl_dir.join("aiw.jsonc");
+        std::fs::write(&shared_template, r#"{"extends": "code"}"#).expect("write shared template");
+
+        let local_fence = workspace_path.join("fence.jsonc");
+        std::fs::write(&local_fence, r#"{"extends": "code"}"#).expect("write local fence");
+
+        let cmd = vec!["agy".to_string()];
+        let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd)
+            .with_shared_config_dir(shared_dir);
+        let args = builder.build_args().expect("build_args");
+
+        let local_str = local_fence.display().to_string();
+        expect_that!(
+            args.as_slice(),
+            contains_subslice(&["--settings", &local_str])
         );
     }
 

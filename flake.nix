@@ -48,8 +48,8 @@
           '';
           postInstall = ''
             mkdir -p $out/share/aiw/templates $out/share/fence/templates
-            cp templates/aiw.json $out/share/aiw/templates/
-            cp templates/aiw.json $out/share/fence/templates/
+            cp templates/aiw.jsonc $out/share/aiw/templates/
+            cp templates/aiw.jsonc $out/share/fence/templates/
           '';
         };
       in

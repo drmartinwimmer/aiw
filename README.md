@@ -105,7 +105,7 @@ aiw agy feature-login --dry-run
 Output example:
 
 ```text
-fence --settings /path/to/repo/fence.json -- direnv exec . agy --dangerously-skip-permissions
+fence --settings /path/to/repo/fence.jsonc -- direnv exec . agy --dangerously-skip-permissions
 ```
 
 ### 3. Forward Arguments to the Agent
@@ -132,61 +132,30 @@ This cleans up the Jujutsu workspace registration (`jj workspace forget`) and re
 
 `aiw` uses a clean, two-layer configuration model powered by [Fence](https://github.com/fencesandbox/fence):
 
-### 1. Global AI Workspace Template (`aiw.json`)
+### 1. Global AI Workspace Template (`aiw.jsonc`)
 
-The base template inherits from Fence's built-in `code` template and defines rules common to all `aiw` workspaces. Install it to Fence's default configuration path (`~/.config/fence/fence.json` or `~/.config/fence/aiw.json`):
+The base template (`templates/aiw.jsonc`) inherits from Fence's built-in `code` template and defines rules common to all `aiw` workspaces. Install it to Fence's template directory:
 
 ```bash
-mkdir -p ~/.config/fence
-cp templates/aiw.json ~/.config/fence/fence.json
+mkdir -p ~/.config/fence/templates
+cp templates/aiw.jsonc ~/.config/fence/templates/
 ```
 
-```jsonc
-{
-  "$schema": "https://raw.githubusercontent.com/fencesandbox/fence/main/docs/schema/fence.schema.json",
-  "extends": "code",
-  "network": {
-    "allowLocalOutbound": false,
-    "allowedDomains": [
-      "cloudcode-pa.googleapis.com",
-      "daily-cloudcode-pa.googleapis.com",
-      "aicode.googleapis.com",
-      "aiplatform.googleapis.com",
-      "oauth2.googleapis.com",
-      "accounts.google.com",
-    ],
-  },
-  "filesystem": {
-    "allowWrite": [
-      ".",
-      ".workspaces/**",
-      ".jj/**",
-      "../../.jj/**",
-      ".git/**",
-      "../../.git/**",
-      "~/.gemini/**",
-      "~/.local/share/keyrings/**",
-    ],
-  },
-  "command": {
-    "acceptSharedBinaryCannotRuntimeDeny": ["chroot"],
-  },
-}
-```
+_(When using the Nix flake, the template is automatically packaged and discovered.)_
 
-- **Zero-Config Repositories**: When installed as `~/.config/fence/fence.json`, Fence discovers it automatically. Standard Jujutsu and Git-backed repositories need no project-level `fence.json` at all.
-- **Scoped Network Access**: Restricts Google API communication strictly to authentication and agent endpoints (`cloudcode-pa.googleapis.com`, `oauth2.googleapis.com`, `accounts.google.com`, etc.) without opening broad wildcards (such as `*.googleusercontent.com` or `*.google.com`).
+- **Zero-Config Workspaces**: When no `fence.jsonc` or `fence.json` exists in the local workspace or repository root, `aiw` automatically discovers and defaults to `aiw.jsonc` in `~/.config/fence/templates/` (or system shared directories).
+- **Hardened Agent Scope**: Extends Fence's baseline `code` template while explicitly restricting network access to essential Google agent and authentication endpoints (`accounts.google.com`, `aicode.googleapis.com`, `aiplatform.googleapis.com`, `cloudcode-pa.googleapis.com`, `daily-cloudcode-pa.googleapis.com`, `oauth2.googleapis.com`) without opening broad wildcards.
 - **Jujutsu & Git Workspace Paths**: Grants write access to `.jj/**` and `.git/**` in the active workspace, as well as `../../.jj/**` and `../../.git/**` at the repository root where Jujutsu/Git stores live.
-- **Agent Data**: Retains state in `~/.gemini/**` and credentials in `~/.local/share/keyrings/**`.
+- **Credential & State Persistence**: Preserves Antigravity agent transcripts and cache in `~/.gemini/**` and keyring credentials in `~/.local/share/keyrings/**`.
 
-### 2. Project-Specific Overrides (`fence.json` or `fence.jsonc`)
+### 2. Project-Specific Overrides (`fence.jsonc`)
 
-If a repository requires project-specific settings (such as exposing an SDK or custom read/write directory), place `fence.json` at your repository root to extend your global Fence template:
+If a repository requires project-specific settings (such as exposing an SDK or custom read/write directory), place `fence.jsonc` at your repository root:
 
 ```jsonc
 {
   "$schema": "https://raw.githubusercontent.com/fencesandbox/fence/main/docs/schema/fence.schema.json",
-  "extends": "$HOME/.config/fence/fence.json",
+  "extends": "./templates/aiw.jsonc",
   "filesystem": {
     "allowRead": ["/nix"],
   },
