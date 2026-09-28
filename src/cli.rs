@@ -24,6 +24,8 @@ enum Commands {
     Agy(AgyCommand),
     /// Forget a workspace
     Forget(ForgetCommand),
+    /// Manage aiw configuration
+    Config(ConfigCommand),
 }
 
 impl Commands {
@@ -31,6 +33,7 @@ impl Commands {
         match self {
             Commands::Agy(cmd) => cmd.run(),
             Commands::Forget(cmd) => cmd.run(),
+            Commands::Config(cmd) => cmd.run(),
         }
     }
 }
@@ -109,6 +112,88 @@ impl AgyCommand {
     }
 }
 
+
+#[derive(clap::Args, Debug, PartialEq, Eq)]
+struct ConfigCommand {
+    #[command(subcommand)]
+    command: ConfigSubcommands,
+}
+
+impl ConfigCommand {
+    fn run(&self) -> Result<(), AppError> {
+        match &self.command {
+            ConfigSubcommands::Init(args) => args.run(),
+        }
+    }
+}
+
+#[derive(Subcommand, Debug, PartialEq, Eq)]
+enum ConfigSubcommands {
+    /// Initialize aiw.jsonc and fence.jsonc configuration files
+    Init(ConfigInitArgs),
+}
+
+#[derive(clap::Args, Debug, PartialEq, Eq)]
+struct ConfigInitArgs {
+    /// Overwrite existing configuration files
+    #[arg(long, short)]
+    force: bool,
+
+    /// Only initialize user config (~/.config/aiw/aiw.jsonc)
+    #[arg(long)]
+    user_only: bool,
+
+    /// Only initialize project config (fence.jsonc)
+    #[arg(long)]
+    project_only: bool,
+}
+
+impl ConfigInitArgs {
+    fn run(&self) -> Result<(), AppError> {
+        let current_dir = std::env::current_dir()?;
+        let project_dir = crate::vcs::Vcs::from_path(&current_dir)
+            .map(|v| v.repo_root().to_path_buf())
+            .unwrap_or(current_dir);
+
+        let mut actions_taken = false;
+
+        if !self.project_only {
+            match crate::config::ConfigInitializer::init_user_config(self.force)? {
+                Some(path) => {
+                    println!("Initialized user configuration: {}", path.display());
+                    actions_taken = true;
+                }
+                None => {
+                    if let Some(path) = crate::config::ConfigInitializer::user_config_path() {
+                        println!("User configuration already exists: {}", path.display());
+                    }
+                }
+            }
+        }
+
+        if !self.user_only {
+            match crate::config::ConfigInitializer::init_project_config(&project_dir, self.force)? {
+                Some(path) => {
+                    println!("Initialized project configuration: {}", path.display());
+                    actions_taken = true;
+                }
+                None => {
+                    println!(
+                        "Project configuration already exists: {}",
+                        project_dir.join("fence.jsonc").display()
+                    );
+                }
+            }
+        }
+
+        if !actions_taken && !self.force {
+            println!("No files written. Use --force to overwrite existing configurations.");
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     #[error("{0}")]
@@ -117,6 +202,8 @@ pub enum AppError {
     Sandbox(#[from] SandboxError),
     #[error("{0}")]
     Herdr(#[from] HerdrError),
+    #[error("{0}")]
+    Config(#[from] crate::config::ConfigInitError),
     #[error("{0}")]
     Io(#[from] std::io::Error),
 }
@@ -213,5 +300,32 @@ mod tests {
                 err.kind() == clap::error::ErrorKind::MissingRequiredArgument
             }))
         );
+    }
+
+    #[googletest::test]
+    fn parse_config_init_default_succeeds() {
+        let cli = Cli::try_parse_from(["aiw", "config", "init"]).expect("parse config init");
+        if let Commands::Config(cmd) = cli.command {
+            let ConfigSubcommands::Init(args) = cmd.command;
+            expect_that!(args.force, is_false());
+            expect_that!(args.user_only, is_false());
+            expect_that!(args.project_only, is_false());
+        } else {
+            expect_that!(false, is_true());
+        }
+    }
+
+    #[googletest::test]
+    fn parse_config_init_with_flags_succeeds() {
+        let cli = Cli::try_parse_from(["aiw", "config", "init", "--force", "--user-only"])
+            .expect("parse config init with flags");
+        if let Commands::Config(cmd) = cli.command {
+            let ConfigSubcommands::Init(args) = cmd.command;
+            expect_that!(args.force, is_true());
+            expect_that!(args.user_only, is_true());
+            expect_that!(args.project_only, is_false());
+        } else {
+            expect_that!(false, is_true());
+        }
     }
 }

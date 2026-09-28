@@ -121,10 +121,10 @@ impl<'a> SandboxBuilder<'a> {
         {
             if let Some(ref dir) = self.shared_config_dir {
                 vec![
-                    dir.join("templates").join("aiw.jsonc"),
-                    dir.join("templates").join("aiw.json"),
                     dir.join("aiw.jsonc"),
                     dir.join("aiw.json"),
+                    dir.join("templates").join("aiw.jsonc"),
+                    dir.join("templates").join("aiw.json"),
                 ]
             } else {
                 Vec::new()
@@ -135,32 +135,36 @@ impl<'a> SandboxBuilder<'a> {
         {
             let mut candidates = Vec::new();
 
-            // 1. User configuration directory ($XDG_CONFIG_HOME or ~/.config)
+            // 1. User configuration directory ($XDG_CONFIG_HOME/aiw or ~/.config/aiw)
             let mut config_dirs = Vec::new();
             if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
                 && !xdg.is_empty()
             {
-                config_dirs.push(PathBuf::from(xdg).join("fence"));
+                config_dirs.push(PathBuf::from(xdg).join("aiw"));
             } else if let Ok(home) = std::env::var("HOME")
                 && !home.is_empty()
             {
-                config_dirs.push(PathBuf::from(home).join(".config").join("fence"));
+                config_dirs.push(PathBuf::from(home).join(".config").join("aiw"));
             }
 
             for dir in config_dirs {
-                candidates.push(dir.join("templates").join("aiw.jsonc"));
-                candidates.push(dir.join("templates").join("aiw.json"));
                 candidates.push(dir.join("aiw.jsonc"));
                 candidates.push(dir.join("aiw.json"));
+                candidates.push(dir.join("templates").join("aiw.jsonc"));
+                candidates.push(dir.join("templates").join("aiw.json"));
             }
 
-            // 2. System data directories ($XDG_DATA_DIRS or Nix/system shares)
+            // 2. System configuration directory (/etc/aiw)
+            candidates.push(PathBuf::from("/etc/aiw/aiw.jsonc"));
+            candidates.push(PathBuf::from("/etc/aiw/aiw.json"));
+
+            // 3. System data directories ($XDG_DATA_DIRS or Nix/system shares)
             if let Ok(data_dirs) = std::env::var("XDG_DATA_DIRS") {
                 for data_dir in data_dirs.split(':').filter(|s| !s.is_empty()) {
                     let p = Path::new(data_dir);
-                    candidates.push(p.join("fence/templates/aiw.jsonc"));
-                    candidates.push(p.join("fence/templates/aiw.json"));
+                    candidates.push(p.join("aiw/aiw.jsonc"));
                     candidates.push(p.join("aiw/templates/aiw.jsonc"));
+                    candidates.push(p.join("aiw/aiw.json"));
                     candidates.push(p.join("aiw/templates/aiw.json"));
                 }
             }
@@ -322,11 +326,10 @@ mod tests {
         let repo_root = temp_dir.path().join("repo");
         let workspace_path = repo_root.join(".workspaces").join("ws");
         let shared_dir = temp_dir.path().join("shared");
-        let shared_tpl_dir = shared_dir.join("templates");
         std::fs::create_dir_all(&workspace_path).expect("create ws");
-        std::fs::create_dir_all(&shared_tpl_dir).expect("create shared tpl");
+        std::fs::create_dir_all(&shared_dir).expect("create shared dir");
 
-        let shared_template = shared_tpl_dir.join("aiw.jsonc");
+        let shared_template = shared_dir.join("aiw.jsonc");
         std::fs::write(&shared_template, r#"{"extends": "code"}"#).expect("write shared template");
 
         let cmd = vec!["agy".to_string()];
@@ -347,11 +350,10 @@ mod tests {
         let repo_root = temp_dir.path().join("repo");
         let workspace_path = repo_root.join(".workspaces").join("ws");
         let shared_dir = temp_dir.path().join("shared");
-        let shared_tpl_dir = shared_dir.join("templates");
         std::fs::create_dir_all(&workspace_path).expect("create ws");
-        std::fs::create_dir_all(&shared_tpl_dir).expect("create shared tpl");
+        std::fs::create_dir_all(&shared_dir).expect("create shared dir");
 
-        let shared_template = shared_tpl_dir.join("aiw.jsonc");
+        let shared_template = shared_dir.join("aiw.jsonc");
         std::fs::write(&shared_template, r#"{"extends": "code"}"#).expect("write shared template");
 
         let local_fence = workspace_path.join("fence.jsonc");

@@ -76,16 +76,6 @@ fn init_test_jj_repo(path: &Path) {
     }
 }
 
-fn can_run_fence() -> bool {
-    if which::which("fence").is_err() {
-        return false;
-    }
-    Command::new("fence")
-        .args(["--", "true"])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
 
 fn write_test_fence_json(repo_root: &Path) {
     let tpl_dir = repo_root.join("templates");
@@ -953,9 +943,9 @@ fn workspace_without_fence_json_defaults_to_shared_template() {
 
     // Setup mock XDG_CONFIG_HOME
     let mock_config = temp_dir.path().join("config");
-    let tpl_dir = mock_config.join("fence").join("templates");
-    std::fs::create_dir_all(&tpl_dir).expect("create tpl dir");
-    std::fs::write(tpl_dir.join("aiw.jsonc"), r#"{"extends": "code"}"#).expect("write aiw.jsonc");
+    let aiw_dir = mock_config.join("aiw");
+    std::fs::create_dir_all(&aiw_dir).expect("create aiw dir");
+    std::fs::write(aiw_dir.join("aiw.jsonc"), r#"{"extends": "code"}"#).expect("write aiw.jsonc");
 
     let output = Command::new(env!("CARGO_BIN_EXE_aiw"))
         .args(["agy", "auto-ws", "--dry-run"])
@@ -966,10 +956,63 @@ fn workspace_without_fence_json_defaults_to_shared_template() {
 
     expect_that!(output.status.success(), is_true());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let expected_tpl = tpl_dir.join("aiw.jsonc").to_string_lossy().to_string();
+    let expected_tpl = aiw_dir.join("aiw.jsonc").to_string_lossy().to_string();
     let expected_arg = format!("--settings {expected_tpl}");
     expect_that!(
         stdout.as_ref(),
         contains_substring(expected_arg.as_str())
     );
+}
+
+#[googletest::test]
+fn aiw_config_init_creates_user_and_project_configs() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let repo_root = temp_dir.path().join("repo");
+    init_test_jj_repo(&repo_root);
+
+    let mock_config = temp_dir.path().join("config");
+
+    // 1. First run creates user config and project config
+    let output1 = Command::new(env!("CARGO_BIN_EXE_aiw"))
+        .args(["config", "init"])
+        .current_dir(&repo_root)
+        .env("XDG_CONFIG_HOME", &mock_config)
+        .output()
+        .expect("run aiw config init");
+
+    expect_that!(output1.status.success(), is_true());
+    let stdout1 = String::from_utf8_lossy(&output1.stdout);
+    expect_that!(stdout1.as_ref(), contains_substring("Initialized user configuration"));
+    expect_that!(stdout1.as_ref(), contains_substring("Initialized project configuration"));
+
+    let user_config = mock_config.join("aiw").join("aiw.jsonc");
+    let project_config = repo_root.join("fence.jsonc");
+    expect_that!(user_config.exists(), is_true());
+    expect_that!(project_config.exists(), is_true());
+
+    // 2. Second run without --force reports existing and does not overwrite
+    let output2 = Command::new(env!("CARGO_BIN_EXE_aiw"))
+        .args(["config", "init"])
+        .current_dir(&repo_root)
+        .env("XDG_CONFIG_HOME", &mock_config)
+        .output()
+        .expect("run aiw config init again");
+
+    expect_that!(output2.status.success(), is_true());
+    let stdout2 = String::from_utf8_lossy(&output2.stdout);
+    expect_that!(stdout2.as_ref(), contains_substring("User configuration already exists"));
+    expect_that!(stdout2.as_ref(), contains_substring("Project configuration already exists"));
+
+    // 3. Run with --force overwrites
+    let output3 = Command::new(env!("CARGO_BIN_EXE_aiw"))
+        .args(["config", "init", "--force"])
+        .current_dir(&repo_root)
+        .env("XDG_CONFIG_HOME", &mock_config)
+        .output()
+        .expect("run aiw config init with force");
+
+    expect_that!(output3.status.success(), is_true());
+    let stdout3 = String::from_utf8_lossy(&output3.stdout);
+    expect_that!(stdout3.as_ref(), contains_substring("Initialized user configuration"));
+    expect_that!(stdout3.as_ref(), contains_substring("Initialized project configuration"));
 }
