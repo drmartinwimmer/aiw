@@ -135,17 +135,23 @@ enum ConfigSubcommands {
 
 #[derive(clap::Args, Debug, PartialEq, Eq)]
 struct ConfigInitArgs {
+    /// Target configuration to initialize: user, project, or all (default: all)
+    #[command(subcommand)]
+    target: Option<ConfigInitTarget>,
+
     /// Overwrite existing configuration files
-    #[arg(long, short)]
+    #[arg(long, short, global = true)]
     force: bool,
+}
 
-    /// Only initialize user config (~/.config/aiw/aiw.jsonc)
-    #[arg(long)]
-    user_only: bool,
-
-    /// Only initialize project config (fence.jsonc)
-    #[arg(long)]
-    project_only: bool,
+#[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq)]
+enum ConfigInitTarget {
+    /// Initialize both user (~/.config/aiw/aiw.jsonc) and project (fence.jsonc) configurations
+    All,
+    /// Initialize user configuration (~/.config/aiw/aiw.jsonc)
+    User,
+    /// Initialize project configuration (fence.jsonc)
+    Project,
 }
 
 impl ConfigInitArgs {
@@ -155,9 +161,10 @@ impl ConfigInitArgs {
             .map(|v| v.repo_root().to_path_buf())
             .unwrap_or(current_dir);
 
+        let target = self.target.unwrap_or(ConfigInitTarget::All);
         let mut actions_taken = false;
 
-        if !self.project_only {
+        if target == ConfigInitTarget::User || target == ConfigInitTarget::All {
             match crate::config::ConfigInitializer::init_user_config(self.force)? {
                 Some(path) => {
                     println!("Initialized user configuration: {}", path.display());
@@ -171,7 +178,7 @@ impl ConfigInitArgs {
             }
         }
 
-        if !self.user_only {
+        if target == ConfigInitTarget::Project || target == ConfigInitTarget::All {
             match crate::config::ConfigInitializer::init_project_config(&project_dir, self.force)? {
                 Some(path) => {
                     println!("Initialized project configuration: {}", path.display());
@@ -308,22 +315,45 @@ mod tests {
         if let Commands::Config(cmd) = cli.command {
             let ConfigSubcommands::Init(args) = cmd.command;
             expect_that!(args.force, is_false());
-            expect_that!(args.user_only, is_false());
-            expect_that!(args.project_only, is_false());
+            expect_that!(args.target, none());
         } else {
             expect_that!(false, is_true());
         }
     }
 
     #[googletest::test]
-    fn parse_config_init_with_flags_succeeds() {
-        let cli = Cli::try_parse_from(["aiw", "config", "init", "--force", "--user-only"])
-            .expect("parse config init with flags");
+    fn parse_config_init_user_subcommand_succeeds() {
+        let cli = Cli::try_parse_from(["aiw", "config", "init", "user"]).expect("parse config init user");
+        if let Commands::Config(cmd) = cli.command {
+            let ConfigSubcommands::Init(args) = cmd.command;
+            expect_that!(args.force, is_false());
+            expect_that!(args.target, some(eq(ConfigInitTarget::User)));
+        } else {
+            expect_that!(false, is_true());
+        }
+    }
+
+    #[googletest::test]
+    fn parse_config_init_project_with_force_succeeds() {
+        let cli = Cli::try_parse_from(["aiw", "config", "init", "--force", "project"])
+            .expect("parse config init project with force");
         if let Commands::Config(cmd) = cli.command {
             let ConfigSubcommands::Init(args) = cmd.command;
             expect_that!(args.force, is_true());
-            expect_that!(args.user_only, is_true());
-            expect_that!(args.project_only, is_false());
+            expect_that!(args.target, some(eq(ConfigInitTarget::Project)));
+        } else {
+            expect_that!(false, is_true());
+        }
+    }
+
+    #[googletest::test]
+    fn parse_config_init_all_with_force_succeeds() {
+        let cli = Cli::try_parse_from(["aiw", "config", "init", "all", "-f"])
+            .expect("parse config init all with force");
+        if let Commands::Config(cmd) = cli.command {
+            let ConfigSubcommands::Init(args) = cmd.command;
+            expect_that!(args.force, is_true());
+            expect_that!(args.target, some(eq(ConfigInitTarget::All)));
         } else {
             expect_that!(false, is_true());
         }

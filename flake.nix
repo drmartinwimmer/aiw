@@ -47,10 +47,7 @@
             export PATH="$HOME/bin:$PATH"
           '';
           postInstall = ''
-            mkdir -p $out/share/aiw/templates $out/etc/aiw
-            cp templates/aiw.jsonc $out/share/aiw/
-            cp templates/aiw.jsonc $out/share/aiw/templates/
-            cp templates/aiw.jsonc $out/etc/aiw/
+            install -Dm644 templates/aiw.jsonc $out/share/aiw/aiw.jsonc
           '';
         };
       in

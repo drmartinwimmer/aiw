@@ -120,12 +120,7 @@ impl<'a> SandboxBuilder<'a> {
         #[cfg(test)]
         {
             if let Some(ref dir) = self.shared_config_dir {
-                vec![
-                    dir.join("aiw.jsonc"),
-                    dir.join("aiw.json"),
-                    dir.join("templates").join("aiw.jsonc"),
-                    dir.join("templates").join("aiw.json"),
-                ]
+                vec![dir.join("aiw.jsonc")]
             } else {
                 Vec::new()
             }
@@ -135,39 +130,26 @@ impl<'a> SandboxBuilder<'a> {
         {
             let mut candidates = Vec::new();
 
-            // 1. User configuration directory ($XDG_CONFIG_HOME/aiw or ~/.config/aiw)
-            let mut config_dirs = Vec::new();
+            // 1. User configuration directory ($XDG_CONFIG_HOME/aiw/aiw.jsonc or ~/.config/aiw/aiw.jsonc)
             if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
                 && !xdg.is_empty()
             {
-                config_dirs.push(PathBuf::from(xdg).join("aiw"));
+                candidates.push(PathBuf::from(xdg).join("aiw").join("aiw.jsonc"));
             } else if let Ok(home) = std::env::var("HOME")
                 && !home.is_empty()
             {
-                config_dirs.push(PathBuf::from(home).join(".config").join("aiw"));
+                candidates.push(PathBuf::from(home).join(".config").join("aiw").join("aiw.jsonc"));
             }
 
-            for dir in config_dirs {
-                candidates.push(dir.join("aiw.jsonc"));
-                candidates.push(dir.join("aiw.json"));
-                candidates.push(dir.join("templates").join("aiw.jsonc"));
-                candidates.push(dir.join("templates").join("aiw.json"));
-            }
-
-            // 2. System configuration directory (/etc/aiw)
-            candidates.push(PathBuf::from("/etc/aiw/aiw.jsonc"));
-            candidates.push(PathBuf::from("/etc/aiw/aiw.json"));
-
-            // 3. System data directories ($XDG_DATA_DIRS or Nix/system shares)
+            // 2. System / package data directories ($XDG_DATA_DIRS/.../aiw/aiw.jsonc)
             if let Ok(data_dirs) = std::env::var("XDG_DATA_DIRS") {
                 for data_dir in data_dirs.split(':').filter(|s| !s.is_empty()) {
-                    let p = Path::new(data_dir);
-                    candidates.push(p.join("aiw/aiw.jsonc"));
-                    candidates.push(p.join("aiw/templates/aiw.jsonc"));
-                    candidates.push(p.join("aiw/aiw.json"));
-                    candidates.push(p.join("aiw/templates/aiw.json"));
+                    candidates.push(Path::new(data_dir).join("aiw").join("aiw.jsonc"));
                 }
             }
+
+            candidates.push(PathBuf::from("/usr/local/share/aiw/aiw.jsonc"));
+            candidates.push(PathBuf::from("/usr/share/aiw/aiw.jsonc"));
 
             candidates
         }

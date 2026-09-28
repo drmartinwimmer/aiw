@@ -131,7 +131,13 @@ This cleans up the Jujutsu workspace registration (`jj workspace forget`) and re
 To initialize starter configuration files:
 
 ```bash
+# Initialize both user template and project config (default)
 aiw config init
+
+# Or explicitly initialize only user, project, or all:
+aiw config init user
+aiw config init project
+aiw config init all
 ```
 
 This command:
@@ -139,7 +145,7 @@ This command:
 - Initializes `~/.config/aiw/aiw.jsonc` (the user-level configuration template) if it does not exist yet.
 - Initializes `fence.jsonc` in the current project root (extending your user `aiw.jsonc`) if it does not exist yet.
 
-Pass `--force` to overwrite existing files, `--user-only` to only initialize the user template, or `--project-only` to only initialize `fence.jsonc`.
+Pass `--force` (or `-f`) to overwrite existing files.
 
 ---
 
@@ -149,15 +155,15 @@ Pass `--force` to overwrite existing files, `--user-only` to only initialize the
 
 ### 1. Global AI Workspace Template (`aiw.jsonc`)
 
-The base template defines rules common to all `aiw` workspaces (inheriting from Fence's built-in `code` template). It resides in your user configuration directory at `~/.config/aiw/aiw.jsonc` (or system directory `/etc/aiw/aiw.jsonc` / Nix package shares):
+The base template defines rules common to all `aiw` workspaces (inheriting from Fence's built-in `code` template). It resides in your user configuration directory at `~/.config/aiw/aiw.jsonc` (or system/package share at `<data_dir>/aiw/aiw.jsonc`):
 
 ```bash
-aiw config init --user-only
+aiw config init user
 ```
 
-_(When installing via `cargo install --path .` or the Nix flake, the template is automatically placed in the appropriate config directory and auto-discovered.)_
+_(When installing via `cargo install`, the user configuration template is automatically placed in `~/.config/aiw/aiw.jsonc`. When installing via Nix/Home Manager, it is installed in `$out/share/aiw/aiw.jsonc` and discovered via `$XDG_DATA_DIRS`.)_
 
-- **Zero-Config Workspaces**: When no `fence.jsonc` or `fence.json` exists in the local workspace or repository root, `aiw` automatically discovers and defaults to `aiw.jsonc` in `~/.config/aiw/` (or system directories) and passes it to Fence.
+- **Zero-Config Workspaces**: When no `fence.jsonc` or `fence.json` exists in the local workspace or repository root, `aiw` automatically discovers and defaults to `aiw.jsonc` in `~/.config/aiw/aiw.jsonc` (or `$XDG_DATA_DIRS/aiw/aiw.jsonc`) and passes it to Fence.
 - **Hardened Agent Scope**: Extends Fence's baseline `code` template while explicitly restricting network access to essential Google agent and authentication endpoints (`accounts.google.com`, `aicode.googleapis.com`, `aiplatform.googleapis.com`, `cloudcode-pa.googleapis.com`, `daily-cloudcode-pa.googleapis.com`, `oauth2.googleapis.com`) without opening broad wildcards.
 - **Jujutsu & Git Workspace Paths**: Grants write access to `.jj/**` and `.git/**` in the active workspace, as well as `../../.jj/**` and `../../.git/**` at the repository root where Jujutsu/Git stores live.
 - **Credential & State Persistence**: Preserves Antigravity agent transcripts and cache in `~/.gemini/**` and keyring credentials in `~/.local/share/keyrings/**`.

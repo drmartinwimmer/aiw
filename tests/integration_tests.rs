@@ -1016,3 +1016,44 @@ fn aiw_config_init_creates_user_and_project_configs() {
     expect_that!(stdout3.as_ref(), contains_substring("Initialized user configuration"));
     expect_that!(stdout3.as_ref(), contains_substring("Initialized project configuration"));
 }
+
+#[googletest::test]
+fn aiw_config_init_subcommands_user_and_project() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let repo_root = temp_dir.path().join("repo");
+    init_test_jj_repo(&repo_root);
+
+    let mock_config = temp_dir.path().join("config");
+
+    // 1. `config init user` only creates user config
+    let output_user = Command::new(env!("CARGO_BIN_EXE_aiw"))
+        .args(["config", "init", "user"])
+        .current_dir(&repo_root)
+        .env("XDG_CONFIG_HOME", &mock_config)
+        .output()
+        .expect("run aiw config init user");
+
+    expect_that!(output_user.status.success(), is_true());
+    let stdout_user = String::from_utf8_lossy(&output_user.stdout);
+    expect_that!(stdout_user.as_ref(), contains_substring("Initialized user configuration"));
+    expect_that!(stdout_user.as_ref(), not(contains_substring("Initialized project configuration")));
+
+    let user_config = mock_config.join("aiw").join("aiw.jsonc");
+    let project_config = repo_root.join("fence.jsonc");
+    expect_that!(user_config.exists(), is_true());
+    expect_that!(project_config.exists(), is_false());
+
+    // 2. `config init project` only creates project config
+    let output_proj = Command::new(env!("CARGO_BIN_EXE_aiw"))
+        .args(["config", "init", "project"])
+        .current_dir(&repo_root)
+        .env("XDG_CONFIG_HOME", &mock_config)
+        .output()
+        .expect("run aiw config init project");
+
+    expect_that!(output_proj.status.success(), is_true());
+    let stdout_proj = String::from_utf8_lossy(&output_proj.stdout);
+    expect_that!(stdout_proj.as_ref(), not(contains_substring("Initialized user configuration")));
+    expect_that!(stdout_proj.as_ref(), contains_substring("Initialized project configuration"));
+    expect_that!(project_config.exists(), is_true());
+}
