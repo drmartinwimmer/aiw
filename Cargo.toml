@@ -2,7 +2,6 @@
 name = "aiw"
 version = "0.1.0"
 edition = "2024"
-build = "build.rs"
 description = "An easy to use, opinionated tool for creating sandboxed AI workspaces"
 license = "MIT"
 readme = "README.md"

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-/// Default embedded `aiw.jsonc` template content.
-pub const DEFAULT_AIW_TEMPLATE: &str = include_str!("../templates/aiw.jsonc");
+/// Default embedded `fence.jsonc` template content for aiw.
+pub const DEFAULT_AIW_TEMPLATE: &str = include_str!("../templates/fence.jsonc");
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigInitError {
@@ -12,23 +12,23 @@ pub enum ConfigInitError {
 pub struct ConfigInitializer;
 
 impl ConfigInitializer {
-    /// Returns the canonical user config path ($XDG_CONFIG_HOME/aiw/aiw.jsonc or ~/.config/aiw/aiw.jsonc).
+    /// Returns the canonical user config path ($XDG_CONFIG_HOME/aiw/fence.jsonc or ~/.config/aiw/fence.jsonc).
     #[must_use]
     pub fn user_config_path() -> Option<PathBuf> {
         if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
             && !xdg.is_empty()
         {
-            Some(PathBuf::from(xdg).join("aiw").join("aiw.jsonc"))
+            Some(PathBuf::from(xdg).join("aiw").join("fence.jsonc"))
         } else if let Ok(home) = std::env::var("HOME")
             && !home.is_empty()
         {
-            Some(PathBuf::from(home).join(".config").join("aiw").join("aiw.jsonc"))
+            Some(PathBuf::from(home).join(".config").join("aiw").join("fence.jsonc"))
         } else {
             None
         }
     }
 
-    /// Initializes user configuration (~/.config/aiw/aiw.jsonc) if it does not exist yet (or if force is true).
+    /// Initializes user configuration (~/.config/aiw/fence.jsonc) if it does not exist yet (or if force is true).
     /// Returns `Ok(Some(path))` if created, `Ok(None)` if already exists and not forced.
     pub fn init_user_config(force: bool) -> Result<Option<PathBuf>, ConfigInitError> {
         let Some(path) = Self::user_config_path() else {
@@ -61,7 +61,7 @@ impl ConfigInitializer {
 
         let base_path_str = Self::user_config_path()
             .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "~/.config/aiw/aiw.jsonc".to_string());
+            .unwrap_or_else(|| "~/.config/aiw/fence.jsonc".to_string());
 
         let content = format!(
             r#"{{

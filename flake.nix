@@ -47,7 +47,7 @@
             export PATH="$HOME/bin:$PATH"
           '';
           postInstall = ''
-            install -Dm644 templates/aiw.jsonc $out/share/aiw/aiw.jsonc
+            install -Dm644 templates/fence.jsonc $out/share/aiw/fence.jsonc
           '';
         };
       in

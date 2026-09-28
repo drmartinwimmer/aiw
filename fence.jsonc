@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/fencesandbox/fence/main/docs/schema/fence.schema.json",
-  "extends": "./templates/aiw.jsonc",
+  "extends": "./templates/fence.jsonc",
   "filesystem": {
     // Project-specific: allow reading the Nix store for toolchains
     "allowRead": [

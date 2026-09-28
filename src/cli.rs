@@ -129,75 +129,96 @@ impl ConfigCommand {
 
 #[derive(Subcommand, Debug, PartialEq, Eq)]
 enum ConfigSubcommands {
-    /// Initialize aiw.jsonc and fence.jsonc configuration files
+    /// Initialize fence.jsonc configuration files
     Init(ConfigInitArgs),
 }
 
 #[derive(clap::Args, Debug, PartialEq, Eq)]
 struct ConfigInitArgs {
-    /// Target configuration to initialize: user, project, or all (default: all)
+    /// Target configuration to initialize: project (default) or user
     #[command(subcommand)]
-    target: Option<ConfigInitTarget>,
+    target: Option<ConfigInitSubcommand>,
 
     /// Overwrite existing configuration files
     #[arg(long, short, global = true)]
     force: bool,
 }
 
-#[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq)]
-enum ConfigInitTarget {
-    /// Initialize both user (~/.config/aiw/aiw.jsonc) and project (fence.jsonc) configurations
-    All,
-    /// Initialize user configuration (~/.config/aiw/aiw.jsonc)
-    User,
-    /// Initialize project configuration (fence.jsonc)
-    Project,
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+enum ConfigInitSubcommand {
+    /// Initialize project configuration (fence.jsonc) [default]
+    Project(ConfigInitProjectArgs),
+    /// Initialize user configuration (~/.config/aiw/fence.jsonc)
+    User(ConfigInitUserArgs),
 }
 
-impl ConfigInitArgs {
-    fn run(&self) -> Result<(), AppError> {
+#[derive(clap::Args, Debug, Clone, PartialEq, Eq)]
+struct ConfigInitProjectArgs {
+    /// Overwrite existing configuration files
+    #[arg(long, short)]
+    force: bool,
+}
+
+impl ConfigInitProjectArgs {
+    fn run(&self, global_force: bool) -> Result<(), AppError> {
+        let force = self.force || global_force;
         let current_dir = std::env::current_dir()?;
         let project_dir = crate::vcs::Vcs::from_path(&current_dir)
             .map(|v| v.repo_root().to_path_buf())
             .unwrap_or(current_dir);
 
-        let target = self.target.unwrap_or(ConfigInitTarget::All);
-        let mut actions_taken = false;
-
-        if target == ConfigInitTarget::User || target == ConfigInitTarget::All {
-            match crate::config::ConfigInitializer::init_user_config(self.force)? {
-                Some(path) => {
-                    println!("Initialized user configuration: {}", path.display());
-                    actions_taken = true;
-                }
-                None => {
-                    if let Some(path) = crate::config::ConfigInitializer::user_config_path() {
-                        println!("User configuration already exists: {}", path.display());
-                    }
+        match crate::config::ConfigInitializer::init_project_config(&project_dir, force)? {
+            Some(path) => {
+                println!("Initialized project configuration: {}", path.display());
+            }
+            None => {
+                println!(
+                    "Project configuration already exists: {}",
+                    project_dir.join("fence.jsonc").display()
+                );
+                if !force {
+                    println!("No files written. Use --force to overwrite existing configurations.");
                 }
             }
         }
-
-        if target == ConfigInitTarget::Project || target == ConfigInitTarget::All {
-            match crate::config::ConfigInitializer::init_project_config(&project_dir, self.force)? {
-                Some(path) => {
-                    println!("Initialized project configuration: {}", path.display());
-                    actions_taken = true;
-                }
-                None => {
-                    println!(
-                        "Project configuration already exists: {}",
-                        project_dir.join("fence.jsonc").display()
-                    );
-                }
-            }
-        }
-
-        if !actions_taken && !self.force {
-            println!("No files written. Use --force to overwrite existing configurations.");
-        }
-
         Ok(())
+    }
+}
+
+#[derive(clap::Args, Debug, Clone, PartialEq, Eq)]
+struct ConfigInitUserArgs {
+    /// Overwrite existing configuration files
+    #[arg(long, short)]
+    force: bool,
+}
+
+impl ConfigInitUserArgs {
+    fn run(&self, global_force: bool) -> Result<(), AppError> {
+        let force = self.force || global_force;
+        match crate::config::ConfigInitializer::init_user_config(force)? {
+            Some(path) => {
+                println!("Initialized user configuration: {}", path.display());
+            }
+            None => {
+                if let Some(path) = crate::config::ConfigInitializer::user_config_path() {
+                    println!("User configuration already exists: {}", path.display());
+                }
+                if !force {
+                    println!("No files written. Use --force to overwrite existing configurations.");
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ConfigInitArgs {
+    fn run(&self) -> Result<(), AppError> {
+        match &self.target {
+            Some(ConfigInitSubcommand::User(cmd)) => cmd.run(self.force),
+            Some(ConfigInitSubcommand::Project(cmd)) => cmd.run(self.force),
+            None => ConfigInitProjectArgs { force: self.force }.run(self.force),
+        }
     }
 }
 
@@ -327,7 +348,10 @@ mod tests {
         if let Commands::Config(cmd) = cli.command {
             let ConfigSubcommands::Init(args) = cmd.command;
             expect_that!(args.force, is_false());
-            expect_that!(args.target, some(eq(ConfigInitTarget::User)));
+            expect_that!(
+                args.target,
+                some(eq(&ConfigInitSubcommand::User(ConfigInitUserArgs { force: false })))
+            );
         } else {
             expect_that!(false, is_true());
         }
@@ -340,20 +364,25 @@ mod tests {
         if let Commands::Config(cmd) = cli.command {
             let ConfigSubcommands::Init(args) = cmd.command;
             expect_that!(args.force, is_true());
-            expect_that!(args.target, some(eq(ConfigInitTarget::Project)));
+            expect_that!(
+                args.target,
+                some(eq(&ConfigInitSubcommand::Project(ConfigInitProjectArgs { force: true })))
+            );
         } else {
             expect_that!(false, is_true());
         }
     }
 
     #[googletest::test]
-    fn parse_config_init_all_with_force_succeeds() {
-        let cli = Cli::try_parse_from(["aiw", "config", "init", "all", "-f"])
-            .expect("parse config init all with force");
+    fn parse_config_init_project_subcommand_with_own_force_succeeds() {
+        let cli = Cli::try_parse_from(["aiw", "config", "init", "project", "-f"])
+            .expect("parse config init project with own force");
         if let Commands::Config(cmd) = cli.command {
             let ConfigSubcommands::Init(args) = cmd.command;
-            expect_that!(args.force, is_true());
-            expect_that!(args.target, some(eq(ConfigInitTarget::All)));
+            expect_that!(
+                args.target,
+                some(eq(&ConfigInitSubcommand::Project(ConfigInitProjectArgs { force: true })))
+            );
         } else {
             expect_that!(false, is_true());
         }

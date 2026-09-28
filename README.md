@@ -52,6 +52,7 @@ Ensure you have Rust and Cargo installed (edition 2024 supported):
 git clone https://github.com/<your-username>/aiw.git
 cd aiw
 cargo install --path .
+aiw config init user
 ```
 
 ### With Nix / Flakes
@@ -131,19 +132,19 @@ This cleans up the Jujutsu workspace registration (`jj workspace forget`) and re
 To initialize starter configuration files:
 
 ```bash
-# Initialize both user template and project config (default)
+# Initialize project fence.jsonc in current repo root (default)
 aiw config init
-
-# Or explicitly initialize only user, project, or all:
-aiw config init user
+# Or explicitly:
 aiw config init project
-aiw config init all
+
+# Initialize user-level template in ~/.config/aiw/fence.jsonc
+aiw config init user
 ```
 
 This command:
 
-- Initializes `~/.config/aiw/aiw.jsonc` (the user-level configuration template) if it does not exist yet.
-- Initializes `fence.jsonc` in the current project root (extending your user `aiw.jsonc`) if it does not exist yet.
+- `aiw config init` (or `aiw config init project`): Creates `fence.jsonc` in the current project root, extending your user `~/.config/aiw/fence.jsonc`.
+- `aiw config init user`: Creates `~/.config/aiw/fence.jsonc` with the recommended base template.
 
 Pass `--force` (or `-f`) to overwrite existing files.
 
@@ -153,17 +154,17 @@ Pass `--force` (or `-f`) to overwrite existing files.
 
 `aiw` uses a clean, two-layer configuration model powered by [Fence](https://github.com/fencesandbox/fence):
 
-### 1. Global AI Workspace Template (`aiw.jsonc`)
+### 1. Global AI Workspace Template (`fence.jsonc`)
 
-The base template defines rules common to all `aiw` workspaces (inheriting from Fence's built-in `code` template). It resides in your user configuration directory at `~/.config/aiw/aiw.jsonc` (or system/package share at `<data_dir>/aiw/aiw.jsonc`):
+The base template defines rules common to all `aiw` workspaces (inheriting from Fence's built-in `code` template). It resides in your user configuration directory at `~/.config/aiw/fence.jsonc` (or system/package share at `<data_dir>/aiw/fence.jsonc`):
 
 ```bash
 aiw config init user
 ```
 
-_(When installing via `cargo install`, the user configuration template is automatically placed in `~/.config/aiw/aiw.jsonc`. When installing via Nix/Home Manager, it is installed in `$out/share/aiw/aiw.jsonc` and discovered via `$XDG_DATA_DIRS`.)_
+_(When installing via Nix/Home Manager, it is installed in `$out/share/aiw/fence.jsonc` and discovered via `$XDG_DATA_DIRS`. When installing via `cargo install`, run `aiw config init user` to place it in `~/.config/aiw/fence.jsonc`.)_
 
-- **Zero-Config Workspaces**: When no `fence.jsonc` or `fence.json` exists in the local workspace or repository root, `aiw` automatically discovers and defaults to `aiw.jsonc` in `~/.config/aiw/aiw.jsonc` (or `$XDG_DATA_DIRS/aiw/aiw.jsonc`) and passes it to Fence.
+- **Zero-Config Workspaces**: When no `fence.jsonc` or `fence.json` exists in the local workspace or repository root, `aiw` automatically discovers and defaults to `fence.jsonc` in `~/.config/aiw/fence.jsonc` (or `$XDG_DATA_DIRS/aiw/fence.jsonc`) and passes it to Fence.
 - **Hardened Agent Scope**: Extends Fence's baseline `code` template while explicitly restricting network access to essential Google agent and authentication endpoints (`accounts.google.com`, `aicode.googleapis.com`, `aiplatform.googleapis.com`, `cloudcode-pa.googleapis.com`, `daily-cloudcode-pa.googleapis.com`, `oauth2.googleapis.com`) without opening broad wildcards.
 - **Jujutsu & Git Workspace Paths**: Grants write access to `.jj/**` and `.git/**` in the active workspace, as well as `../../.jj/**` and `../../.git/**` at the repository root where Jujutsu/Git stores live.
 - **Credential & State Persistence**: Preserves Antigravity agent transcripts and cache in `~/.gemini/**` and keyring credentials in `~/.local/share/keyrings/**`.
@@ -175,7 +176,7 @@ If a repository requires project-specific settings (such as exposing an SDK or c
 ```jsonc
 {
   "$schema": "https://raw.githubusercontent.com/fencesandbox/fence/main/docs/schema/fence.schema.json",
-  "extends": "./templates/aiw.jsonc",
+  "extends": "~/.config/aiw/fence.jsonc",
   "filesystem": {
     "allowRead": ["/nix"],
   },

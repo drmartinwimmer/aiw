@@ -120,7 +120,7 @@ impl<'a> SandboxBuilder<'a> {
         #[cfg(test)]
         {
             if let Some(ref dir) = self.shared_config_dir {
-                vec![dir.join("aiw.jsonc")]
+                vec![dir.join("fence.jsonc")]
             } else {
                 Vec::new()
             }
@@ -130,26 +130,26 @@ impl<'a> SandboxBuilder<'a> {
         {
             let mut candidates = Vec::new();
 
-            // 1. User configuration directory ($XDG_CONFIG_HOME/aiw/aiw.jsonc or ~/.config/aiw/aiw.jsonc)
+            // 1. User configuration directory ($XDG_CONFIG_HOME/aiw/fence.jsonc or ~/.config/aiw/fence.jsonc)
             if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
                 && !xdg.is_empty()
             {
-                candidates.push(PathBuf::from(xdg).join("aiw").join("aiw.jsonc"));
+                candidates.push(PathBuf::from(xdg).join("aiw").join("fence.jsonc"));
             } else if let Ok(home) = std::env::var("HOME")
                 && !home.is_empty()
             {
-                candidates.push(PathBuf::from(home).join(".config").join("aiw").join("aiw.jsonc"));
+                candidates.push(PathBuf::from(home).join(".config").join("aiw").join("fence.jsonc"));
             }
 
-            // 2. System / package data directories ($XDG_DATA_DIRS/.../aiw/aiw.jsonc)
+            // 2. System / package data directories ($XDG_DATA_DIRS/.../aiw/fence.jsonc)
             if let Ok(data_dirs) = std::env::var("XDG_DATA_DIRS") {
                 for data_dir in data_dirs.split(':').filter(|s| !s.is_empty()) {
-                    candidates.push(Path::new(data_dir).join("aiw").join("aiw.jsonc"));
+                    candidates.push(Path::new(data_dir).join("aiw").join("fence.jsonc"));
                 }
             }
 
-            candidates.push(PathBuf::from("/usr/local/share/aiw/aiw.jsonc"));
-            candidates.push(PathBuf::from("/usr/share/aiw/aiw.jsonc"));
+            candidates.push(PathBuf::from("/usr/local/share/aiw/fence.jsonc"));
+            candidates.push(PathBuf::from("/usr/share/aiw/fence.jsonc"));
 
             candidates
         }
@@ -311,12 +311,12 @@ mod tests {
         std::fs::create_dir_all(&workspace_path).expect("create ws");
         std::fs::create_dir_all(&shared_dir).expect("create shared dir");
 
-        let shared_template = shared_dir.join("aiw.jsonc");
+        let shared_template = shared_dir.join("fence.jsonc");
         std::fs::write(&shared_template, r#"{"extends": "code"}"#).expect("write shared template");
 
         let cmd = vec!["agy".to_string()];
         let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd)
-            .with_shared_config_dir(shared_dir);
+            .with_shared_config_dir(shared_dir.clone());
         let args = builder.build_args().expect("build_args");
 
         let tpl_str = shared_template.display().to_string();
@@ -335,7 +335,7 @@ mod tests {
         std::fs::create_dir_all(&workspace_path).expect("create ws");
         std::fs::create_dir_all(&shared_dir).expect("create shared dir");
 
-        let shared_template = shared_dir.join("aiw.jsonc");
+        let shared_template = shared_dir.join("fence.jsonc");
         std::fs::write(&shared_template, r#"{"extends": "code"}"#).expect("write shared template");
 
         let local_fence = workspace_path.join("fence.jsonc");
