@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
-use crate::workspace::WorkspaceError;
 use super::normalize_search_dir;
+use crate::workspace::WorkspaceError;
+use std::path::{Path, PathBuf};
 
 /// Encapsulates Jujutsu repository operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -200,16 +200,26 @@ mod tests {
         let rel_ws_path = Path::new(".workspaces").join(ws_name);
         let abs_ws_path = repo_root.join(&rel_ws_path);
 
-        expect_that!(jj.is_workspace_registered(ws_name).expect("is_registered"), is_false());
+        expect_that!(
+            jj.is_workspace_registered(ws_name).expect("is_registered"),
+            is_false()
+        );
         expect_that!(jj.workspace_exists(&abs_ws_path), is_false());
 
         std::fs::create_dir_all(repo_root.join(".workspaces")).expect("create .workspaces");
-        jj.add_workspace(&rel_ws_path, ws_name).expect("add_workspace");
+        jj.add_workspace(&rel_ws_path, ws_name)
+            .expect("add_workspace");
 
-        expect_that!(jj.is_workspace_registered(ws_name).expect("is_registered"), is_true());
+        expect_that!(
+            jj.is_workspace_registered(ws_name).expect("is_registered"),
+            is_true()
+        );
         expect_that!(jj.workspace_exists(&abs_ws_path), is_true());
 
         jj.forget_workspace(ws_name).expect("forget_workspace");
-        expect_that!(jj.is_workspace_registered(ws_name).expect("is_registered"), is_false());
+        expect_that!(
+            jj.is_workspace_registered(ws_name).expect("is_registered"),
+            is_false()
+        );
     }
 }

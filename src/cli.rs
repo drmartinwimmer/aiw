@@ -1,12 +1,12 @@
 use std::path::Path;
 
-use clap::{Parser, Subcommand};
 use crate::config::{ConfigInitError, ConfigInitializer};
 use crate::direnv::Direnv;
 use crate::herdr::{Herdr, HerdrError};
 use crate::sandbox::{SandboxBuilder, SandboxError};
 use crate::vcs::Vcs;
 use crate::workspace::{Workspace, WorkspaceError};
+use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(name = "aiw", about = "AI Workspace Launcher")]
@@ -74,7 +74,11 @@ struct AgyCommand {
 impl AgyCommand {
     fn build_payload_command(&self) -> Vec<String> {
         let mut cmd = vec!["agy".to_string()];
-        if !self.extra_args.iter().any(|a| a == "--dangerously-skip-permissions") {
+        if !self
+            .extra_args
+            .iter()
+            .any(|a| a == "--dangerously-skip-permissions")
+        {
             cmd.push("--dangerously-skip-permissions".to_string());
         }
         cmd.extend(self.extra_args.clone());
@@ -94,20 +98,15 @@ impl AgyCommand {
         }
 
         let payload = self.build_payload_command();
-        let builder = SandboxBuilder::for_workspace(&workspace, &payload)
-            .with_direnv(direnv.is_allowed());
+        let builder =
+            SandboxBuilder::for_workspace(&workspace, &payload).with_direnv(direnv.is_allowed());
 
         if self.dry_run {
             println!("{builder}");
             Ok(())
         } else if let Some(herdr) = Herdr::from_env() {
             let cmd = format!("{builder}");
-            herdr.run_command(
-                &self.workspace_name,
-                &cmd,
-                "agy",
-                Some(workspace.path()),
-            )?;
+            herdr.run_command(&self.workspace_name, &cmd, "agy", Some(workspace.path()))?;
             Ok(())
         } else {
             builder.run()?;
@@ -115,7 +114,6 @@ impl AgyCommand {
         }
     }
 }
-
 
 #[derive(clap::Args, Debug, PartialEq, Eq)]
 struct ConfigCommand {
@@ -279,7 +277,10 @@ mod tests {
         if let Commands::Agy(cmd) = cli.command {
             expect_that!(&cmd.workspace_name, eq("feature-1"));
             expect_that!(cmd.dry_run, is_true());
-            expect_that!(&cmd.extra_args, elements_are![eq("--model"), eq("gemini-2.5")]);
+            expect_that!(
+                &cmd.extra_args,
+                elements_are![eq("--model"), eq("gemini-2.5")]
+            );
         } else {
             expect_that!(false, is_true());
         }
@@ -342,13 +343,16 @@ mod tests {
 
     #[googletest::test]
     fn parse_config_init_user_subcommand_succeeds() {
-        let cli = Cli::try_parse_from(["aiw", "config", "init", "user"]).expect("parse config init user");
+        let cli =
+            Cli::try_parse_from(["aiw", "config", "init", "user"]).expect("parse config init user");
         if let Commands::Config(cmd) = cli.command {
             let ConfigSubcommands::Init(args) = cmd.command;
             expect_that!(args.force, is_false());
             expect_that!(
                 args.target,
-                some(eq(&ConfigInitSubcommand::User(ConfigInitUserSubcommand { force: false })))
+                some(eq(&ConfigInitSubcommand::User(ConfigInitUserSubcommand {
+                    force: false
+                })))
             );
         } else {
             expect_that!(false, is_true());
@@ -364,7 +368,9 @@ mod tests {
             expect_that!(args.force, is_true());
             expect_that!(
                 args.target,
-                some(eq(&ConfigInitSubcommand::Project(ConfigInitProjectSubcommand { force: true })))
+                some(eq(&ConfigInitSubcommand::Project(
+                    ConfigInitProjectSubcommand { force: true }
+                )))
             );
         } else {
             expect_that!(false, is_true());
@@ -379,7 +385,9 @@ mod tests {
             let ConfigSubcommands::Init(args) = cmd.command;
             expect_that!(
                 args.target,
-                some(eq(&ConfigInitSubcommand::Project(ConfigInitProjectSubcommand { force: true })))
+                some(eq(&ConfigInitSubcommand::Project(
+                    ConfigInitProjectSubcommand { force: true }
+                )))
             );
         } else {
             expect_that!(false, is_true());

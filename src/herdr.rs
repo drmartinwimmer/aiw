@@ -1,6 +1,6 @@
+use crate::direnv::ensure_user_profile_bin_paths;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use crate::direnv::ensure_user_profile_bin_paths;
 
 #[derive(Debug, thiserror::Error)]
 pub enum HerdrError {
@@ -147,7 +147,9 @@ impl Herdr {
                         std::thread::sleep(std::time::Duration::from_millis(20));
                     }
                     Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                        break Err(HerdrError::BinaryNotFound(self.binary.to_string_lossy().into_owned()));
+                        break Err(HerdrError::BinaryNotFound(
+                            self.binary.to_string_lossy().into_owned(),
+                        ));
                     }
                     Err(err) => break Err(HerdrError::Io(err)),
                 }
@@ -168,7 +170,11 @@ impl Herdr {
             return Err(HerdrError::CommandFailed {
                 command: format!("{} {}", self.binary.to_string_lossy(), args.join(" ")),
                 code: output.status.code(),
-                stderr: if stderr.trim().is_empty() { stdout } else { stderr },
+                stderr: if stderr.trim().is_empty() {
+                    stdout
+                } else {
+                    stderr
+                },
             });
         }
 
@@ -271,7 +277,12 @@ impl Herdr {
     }
 
     /// Reports agent lifecycle state to Herdr for the given pane.
-    pub(crate) fn report_agent(&self, pane_id: &str, agent: &str, state: &str) -> Result<(), HerdrError> {
+    pub(crate) fn report_agent(
+        &self,
+        pane_id: &str,
+        agent: &str,
+        state: &str,
+    ) -> Result<(), HerdrError> {
         self.execute_cmd(&[
             "pane",
             "report-agent",
@@ -496,7 +507,10 @@ mod tests {
         expect_that!(herdr.workspace_id(), some(eq("ws-42")));
         expect_that!(herdr.tab_id(), some(eq("ws-42:t9")));
         expect_that!(herdr.pane_id(), some(eq("ws-42:p9")));
-        expect_that!(herdr.socket_path(), some(eq(Path::new("/custom/socket.sock"))));
+        expect_that!(
+            herdr.socket_path(),
+            some(eq(Path::new("/custom/socket.sock")))
+        );
 
         remove_env("HERDR_ENV");
         remove_env("HERDR_BIN_PATH");
@@ -667,12 +681,7 @@ exit 0
             .with_tab_id("w1:t5")
             .with_pane_id("w1:p5");
 
-        let res = herdr.run_command(
-            "ws-current",
-            "true",
-            "agy",
-            None,
-        );
+        let res = herdr.run_command("ws-current", "true", "agy", None);
         expect_that!(res, ok(anything()));
 
         let logged = std::fs::read_to_string(&log_path).expect("read log");
@@ -697,7 +706,9 @@ exit 1
         let res = herdr.get_tab("w1:t99");
         expect_that!(
             res,
-            matches_pattern!(Err(matches_pattern!(HerdrError::Api(eq("tab w1:t99 not found")))))
+            matches_pattern!(Err(matches_pattern!(HerdrError::Api(eq(
+                "tab w1:t99 not found"
+            )))))
         );
     }
 
@@ -707,7 +718,9 @@ exit 1
         let res = herdr.get_tab("w1:t1");
         expect_that!(
             res,
-            matches_pattern!(Err(matches_pattern!(HerdrError::BinaryNotFound(anything()))))
+            matches_pattern!(Err(matches_pattern!(
+                HerdrError::BinaryNotFound(anything())
+            )))
         );
     }
 }

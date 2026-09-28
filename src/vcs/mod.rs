@@ -1,10 +1,10 @@
 pub(crate) mod git;
 pub(crate) mod jj;
 
-use std::path::{Path, PathBuf};
 use crate::workspace::WorkspaceError;
 pub(crate) use git::Git;
 pub(crate) use jj::Jj;
+use std::path::{Path, PathBuf};
 
 pub(crate) fn normalize_search_dir(start_dir: &Path) -> Result<PathBuf, std::io::Error> {
     let abs_dir = if start_dir.is_absolute() {
@@ -63,7 +63,8 @@ impl Vcs {
                     Ok(Self {
                         kind: VcsKind::Git(git),
                     })
-                } else if jj_canonical.starts_with(&git_canonical) && jj_canonical != git_canonical {
+                } else if jj_canonical.starts_with(&git_canonical) && jj_canonical != git_canonical
+                {
                     // JJ repo is nested inside a Git repo
                     Ok(Self {
                         kind: VcsKind::Jj(jj),
@@ -208,7 +209,9 @@ mod tests {
         init_test_git_repo(repo_root);
 
         let vcs = Vcs::from_path(repo_root).expect("from_path");
-        let canonical_root = repo_root.canonicalize().unwrap_or_else(|_| repo_root.to_path_buf());
+        let canonical_root = repo_root
+            .canonicalize()
+            .unwrap_or_else(|_| repo_root.to_path_buf());
         expect_that!(vcs.repo_root(), eq(&canonical_root));
         expect_that!(matches!(vcs.kind, VcsKind::Git(_)), is_true());
     }
@@ -225,7 +228,9 @@ mod tests {
 
         // Inside the nested git repo root:
         let vcs_nested = Vcs::from_path(&nested_git).expect("Vcs inside nested git");
-        let canonical_nested = nested_git.canonicalize().unwrap_or_else(|_| nested_git.clone());
+        let canonical_nested = nested_git
+            .canonicalize()
+            .unwrap_or_else(|_| nested_git.clone());
         expect_that!(matches!(vcs_nested.kind, VcsKind::Git(_)), is_true());
         expect_that!(vcs_nested.repo_root(), eq(&canonical_nested));
 
@@ -259,7 +264,9 @@ mod tests {
 
         // Outside in the outer Git repo:
         let vcs_outer = Vcs::from_path(outer_git).expect("Vcs inside outer git");
-        let canonical_outer = outer_git.canonicalize().unwrap_or_else(|_| outer_git.to_path_buf());
+        let canonical_outer = outer_git
+            .canonicalize()
+            .unwrap_or_else(|_| outer_git.to_path_buf());
         expect_that!(matches!(vcs_outer.kind, VcsKind::Git(_)), is_true());
         expect_that!(vcs_outer.repo_root(), eq(&canonical_outer));
     }

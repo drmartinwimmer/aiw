@@ -40,10 +40,7 @@ impl ConfigInitializer {
     }
 
     /// Initializes project configuration (fence.jsonc) in `target_dir` if it does not exist yet (or if force is true).
-    pub fn init_project_config(
-        target_dir: &Path,
-        force: bool,
-    ) -> Result<PathBuf, ConfigInitError> {
+    pub fn init_project_config(target_dir: &Path, force: bool) -> Result<PathBuf, ConfigInitError> {
         let fence_jsonc = target_dir.join("fence.jsonc");
         let fence_json = target_dir.join("fence.json");
 
@@ -83,8 +80,14 @@ mod tests {
 
     #[googletest::test]
     fn default_aiw_template_contains_schema_and_extends() {
-        expect_that!(DEFAULT_AIW_TEMPLATE, contains_substring("fence.schema.json"));
-        expect_that!(DEFAULT_AIW_TEMPLATE, contains_substring("\"extends\": \"code\""));
+        expect_that!(
+            DEFAULT_AIW_TEMPLATE,
+            contains_substring("fence.schema.json")
+        );
+        expect_that!(
+            DEFAULT_AIW_TEMPLATE,
+            contains_substring("\"extends\": \"code\"")
+        );
     }
 
     #[googletest::test]
@@ -111,8 +114,8 @@ mod tests {
         );
 
         // Call with force returns Ok(path)
-        let forced = ConfigInitializer::init_project_config(project_dir, true)
-            .expect("forced init");
+        let forced =
+            ConfigInitializer::init_project_config(project_dir, true).expect("forced init");
         expect_that!(forced, eq(&project_dir.join("fence.jsonc")));
     }
 }

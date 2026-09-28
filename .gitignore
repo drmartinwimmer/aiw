@@ -2,3 +2,4 @@
 /.direnv
 /.workspaces
 /result
+/fence-seccomp

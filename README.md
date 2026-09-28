@@ -2,6 +2,9 @@
 
 > **An easy-to-use, opinionated tool for creating sandboxed AI workspaces.**
 
+[![CI](https://github.com/drmartinwimmer/aiw/actions/workflows/ci.yml/badge.svg)](https://github.com/drmartinwimmer/aiw/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/aiw.svg)](https://crates.io/crates/aiw)
+[![Docs.rs](https://docs.rs/aiw/badge.svg)](https://docs.rs/aiw)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Built with Rust](https://img.shields.io/badge/rust-2024%20edition-orange.svg)](https://www.rust-lang.org/)
 

@@ -3,7 +3,9 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn can_run_fence() -> bool {
-    if which::which("fence").is_err() {
+    // Nested container/LSM sandboxing inside the Nix daemon build sandbox
+    // is unsupported due to multi-layer namespace filesystem isolation.
+    if std::env::var("NIX_BUILD_TOP").is_ok() || which::which("fence").is_err() {
         return false;
     }
     let output = Command::new("fence").args(["--", "true"]).output();
@@ -23,7 +25,10 @@ fn init_test_git_repo(path: &Path) {
             .arg(path)
             .output()
             .expect("git init");
-        assert!(fallback.status.success(), "Failed to initialize Git repository");
+        assert!(
+            fallback.status.success(),
+            "Failed to initialize Git repository"
+        );
     }
 
     drop(
@@ -75,7 +80,6 @@ fn init_test_jj_repo(path: &Path) {
         );
     }
 }
-
 
 fn write_test_fence_json(repo_root: &Path) {
     let tpl_dir = repo_root.join("templates");
@@ -210,7 +214,9 @@ fn missing_jj_repository_fails_with_clear_error() {
 #[googletest::test]
 fn live_fence_execution_in_temp_workspace_runs_and_verifies_containment() {
     if !can_run_fence() || which::which("agy").is_err() {
-        eprintln!("Skipping live_fence_execution test: fence sandbox or agy unavailable in this environment");
+        eprintln!(
+            "Skipping live_fence_execution test: fence sandbox or agy unavailable in this environment"
+        );
         return;
     }
 
@@ -224,7 +230,13 @@ fn live_fence_execution_in_temp_workspace_runs_and_verifies_containment() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!stdout.trim().is_empty(), "run_aiw stdout was empty! exit_code={:?}, stdout={}, stderr={}", output.status.code(), stdout, stderr);
+    assert!(
+        !stdout.trim().is_empty(),
+        "run_aiw stdout was empty! exit_code={:?}, stdout={}, stderr={}",
+        output.status.code(),
+        stdout,
+        stderr
+    );
 
     let ws_path = repo_root.join(".workspaces").join("live-workspace");
     expect_that!(ws_path.exists(), is_true());
@@ -234,7 +246,9 @@ fn live_fence_execution_in_temp_workspace_runs_and_verifies_containment() {
 #[googletest::test]
 fn jj_commands_in_fence_sandbox_execute_successfully_and_persist_commits() {
     if !can_run_fence() || which::which("jj").is_err() {
-        eprintln!("Skipping jj_commands_in_fence_sandbox test: fence sandbox or jj unavailable in this environment");
+        eprintln!(
+            "Skipping jj_commands_in_fence_sandbox test: fence sandbox or jj unavailable in this environment"
+        );
         return;
     }
 
@@ -243,8 +257,7 @@ fn jj_commands_in_fence_sandbox_execute_successfully_and_persist_commits() {
     init_test_jj_repo(repo_root);
     write_test_fence_json(repo_root);
 
-    let ws = aiw::workspace::Workspace::new(repo_root, "jj-fence-test")
-        .expect("Workspace::new");
+    let ws = aiw::workspace::Workspace::new(repo_root, "jj-fence-test").expect("Workspace::new");
     ws.ensure().expect("ensure workspace");
     let ws_path = ws.path();
 
@@ -333,7 +346,10 @@ fn forget_subcommand_removes_workspace_from_jj_list() {
         String::from_utf8_lossy(&list_after.stdout).as_ref(),
         not(contains_substring("ws-to-forget"))
     );
-    expect_that!(repo_root.join(".workspaces").join("ws-to-forget").exists(), is_false());
+    expect_that!(
+        repo_root.join(".workspaces").join("ws-to-forget").exists(),
+        is_false()
+    );
 }
 
 #[googletest::test]
@@ -386,7 +402,9 @@ fn recreating_forgotten_workspace_calls_direnv_allow() {
 #[googletest::test]
 fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
     if !can_run_fence() || which::which("direnv").is_err() {
-        eprintln!("Skipping sandbox_command_runs_in_correct_working_directory_and_loads_direnv: fence sandbox or direnv unavailable in this environment");
+        eprintln!(
+            "Skipping sandbox_command_runs_in_correct_working_directory_and_loads_direnv: fence sandbox or direnv unavailable in this environment"
+        );
         return;
     }
 
@@ -435,8 +453,8 @@ fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
         "-c".to_string(),
         "echo CWD=$PWD; echo VAL=$AIW_DIRENV_LOADED".to_string(),
     ];
-    let builder = aiw::sandbox::SandboxBuilder::new(&ws_path, repo_root, &test_cmd)
-        .with_direnv(true);
+    let builder =
+        aiw::sandbox::SandboxBuilder::new(&ws_path, repo_root, &test_cmd).with_direnv(true);
     let mut cmd = builder.build_command().expect("build_command");
     let output = cmd.output().expect("execute sandbox command");
 
@@ -453,18 +471,18 @@ fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
 
     expect_that!(
         stdout.as_ref(),
-        predicate(|s: &str| s.contains(&format!("CWD={canonical_ws_str}")) || s.contains(&format!("CWD={ws_str}")))
+        predicate(|s: &str| s.contains(&format!("CWD={canonical_ws_str}"))
+            || s.contains(&format!("CWD={ws_str}")))
     );
-    expect_that!(
-        stdout.as_ref(),
-        contains_substring("VAL=sandbox_direnv_ok")
-    );
+    expect_that!(stdout.as_ref(), contains_substring("VAL=sandbox_direnv_ok"));
 }
 
 #[googletest::test]
 fn sandbox_does_not_auto_allow_direnv_when_repo_root_is_not_allowed() {
     if which::which("fence").is_err() || which::which("direnv").is_err() {
-        eprintln!("Skipping sandbox_does_not_auto_allow_direnv_when_repo_root_is_not_allowed: fence or direnv not found");
+        eprintln!(
+            "Skipping sandbox_does_not_auto_allow_direnv_when_repo_root_is_not_allowed: fence or direnv not found"
+        );
         return;
     }
 
@@ -477,8 +495,7 @@ fn sandbox_does_not_auto_allow_direnv_when_repo_root_is_not_allowed() {
     let repo_envrc = repo_root.join(".envrc");
     std::fs::write(&repo_envrc, "export BLOCKED=1\n").expect("write repo .envrc");
 
-    let ws = aiw::workspace::Workspace::new(repo_root, "unallowed-ws")
-        .expect("Workspace::new");
+    let ws = aiw::workspace::Workspace::new(repo_root, "unallowed-ws").expect("Workspace::new");
     ws.ensure().expect("ensure workspace");
     let ws_path = ws.path().to_path_buf();
     let ws_envrc = ws_path.join(".envrc");
@@ -498,7 +515,9 @@ fn sandbox_does_not_auto_allow_direnv_when_repo_root_is_not_allowed() {
 #[googletest::test]
 fn direnv_allow_called_on_new_workspace_iff_allowed_in_root() {
     if which::which("direnv").is_err() {
-        eprintln!("Skipping direnv_allow_called_on_new_workspace_iff_allowed_in_root: direnv not found");
+        eprintln!(
+            "Skipping direnv_allow_called_on_new_workspace_iff_allowed_in_root: direnv not found"
+        );
         return;
     }
 
@@ -548,7 +567,10 @@ fn direnv_allow_called_on_new_workspace_iff_allowed_in_root() {
         .status()
         .expect("jj commit");
     assert!(status.success());
-    expect_that!(aiw::direnv::Direnv::is_dir_allowed(repo_unallowed), is_false());
+    expect_that!(
+        aiw::direnv::Direnv::is_dir_allowed(repo_unallowed),
+        is_false()
+    );
 
     // Run aiw to create new workspace in unallowed repo
     let out_unallowed = run_aiw(repo_unallowed, &["agy", "new-ws-unallowed", "--dry-run"]);
@@ -557,7 +579,10 @@ fn direnv_allow_called_on_new_workspace_iff_allowed_in_root() {
     let ws_unallowed = repo_unallowed.join(".workspaces").join("new-ws-unallowed");
     expect_that!(ws_unallowed.join(".envrc").exists(), is_true());
     // direnv allow was NOT called because root was not allowed:
-    expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_unallowed), is_false());
+    expect_that!(
+        aiw::direnv::Direnv::is_dir_allowed(&ws_unallowed),
+        is_false()
+    );
 }
 
 #[googletest::test]
@@ -597,8 +622,11 @@ fn existing_workspace_does_not_call_direnv_allow() {
     expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_path), is_true());
 
     // Invalidate the workspace allow status by modifying its .envrc
-    std::fs::write(ws_path.join(".envrc"), "export ROOT_VAR=ok\nexport MODIFIED=1\n")
-        .expect("modify ws .envrc");
+    std::fs::write(
+        ws_path.join(".envrc"),
+        "export ROOT_VAR=ok\nexport MODIFIED=1\n",
+    )
+    .expect("modify ws .envrc");
     // Verify direnv now considers it unallowed/blocked:
     expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_path), is_false());
 
@@ -659,7 +687,10 @@ fn direnv_prepended_to_command_iff_allowed() {
     let out_unallowed = run_aiw(repo_unallowed, &["agy", "ws-cmd-unallowed", "--dry-run"]);
     assert!(out_unallowed.status.success());
     let stdout_unallowed = String::from_utf8_lossy(&out_unallowed.stdout);
-    expect_that!(stdout_unallowed.as_ref(), not(contains_substring("direnv exec .")));
+    expect_that!(
+        stdout_unallowed.as_ref(),
+        not(contains_substring("direnv exec ."))
+    );
     expect_that!(stdout_unallowed.as_ref(), contains_substring("agy"));
 
     // Case 3: root has no .envrc -> direnv is omitted from command
@@ -671,7 +702,10 @@ fn direnv_prepended_to_command_iff_allowed() {
     let out_no_rc = run_aiw(repo_no_rc, &["agy", "ws-cmd-no-rc", "--dry-run"]);
     assert!(out_no_rc.status.success());
     let stdout_no_rc = String::from_utf8_lossy(&out_no_rc.stdout);
-    expect_that!(stdout_no_rc.as_ref(), not(contains_substring("direnv exec .")));
+    expect_that!(
+        stdout_no_rc.as_ref(),
+        not(contains_substring("direnv exec ."))
+    );
     expect_that!(stdout_no_rc.as_ref(), contains_substring("agy"));
 }
 
@@ -727,10 +761,7 @@ exit 0
         &logged,
         contains_substring("pane report-agent --source aiw --agent agy --state working w1:p10")
     );
-    expect_that!(
-        &logged,
-        contains_substring("pane run w1:p10 fence")
-    );
+    expect_that!(&logged, contains_substring("pane run w1:p10 fence"));
     expect_that!(
         &logged,
         contains_substring("agy --dangerously-skip-permissions")
@@ -808,7 +839,10 @@ fn workspace_creation_and_dry_run_in_real_git_repo_succeeds() {
         .expect("git worktree list");
     expect_that!(wt_list.status.success(), is_true());
     let list_stdout = String::from_utf8_lossy(&wt_list.stdout);
-    expect_that!(list_stdout.as_ref(), contains_substring("test-git-workspace"));
+    expect_that!(
+        list_stdout.as_ref(),
+        contains_substring("test-git-workspace")
+    );
 }
 
 #[googletest::test]
@@ -835,7 +869,10 @@ fn idempotent_workspace_reuse_in_real_git_repo_succeeds() {
         .expect("git worktree list");
     expect_that!(wt_list.status.success(), is_true());
     let list_stdout = String::from_utf8_lossy(&wt_list.stdout);
-    expect_that!(list_stdout.as_ref(), contains_substring("reused-git-workspace"));
+    expect_that!(
+        list_stdout.as_ref(),
+        contains_substring("reused-git-workspace")
+    );
 }
 
 #[googletest::test]
@@ -894,7 +931,6 @@ fn git_repo_in_subdirectory_discovers_root_and_creates_workspace() {
     expect_that!(ws_path.join(".git").exists(), is_true());
 }
 
-
 #[googletest::test]
 fn git_repo_nested_inside_jj_repo_identifies_git_root_and_creates_git_workspace() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
@@ -949,7 +985,8 @@ fn workspace_without_fence_json_defaults_to_shared_template() {
     let mock_config = temp_dir.path().join("config");
     let aiw_dir = mock_config.join("aiw");
     std::fs::create_dir_all(&aiw_dir).expect("create aiw dir");
-    std::fs::write(aiw_dir.join("fence.jsonc"), r#"{"extends": "code"}"#).expect("write fence.jsonc");
+    std::fs::write(aiw_dir.join("fence.jsonc"), r#"{"extends": "code"}"#)
+        .expect("write fence.jsonc");
 
     let output = Command::new(env!("CARGO_BIN_EXE_aiw"))
         .args(["agy", "auto-ws", "--dry-run"])
@@ -962,10 +999,7 @@ fn workspace_without_fence_json_defaults_to_shared_template() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let expected_tpl = aiw_dir.join("fence.jsonc").to_string_lossy().to_string();
     let expected_arg = format!("--settings {expected_tpl}");
-    expect_that!(
-        stdout.as_ref(),
-        contains_substring(expected_arg.as_str())
-    );
+    expect_that!(stdout.as_ref(), contains_substring(expected_arg.as_str()));
 }
 
 #[googletest::test]
@@ -1006,7 +1040,10 @@ fn aiw_config_init_defaults_to_project_and_user_subcommand_inits_user() {
     let stdout2 = String::from_utf8_lossy(&output2.stdout);
     let stderr2 = String::from_utf8_lossy(&output2.stderr);
     expect_that!(stdout2.as_ref(), eq(""));
-    expect_that!(stderr2.as_ref(), contains_substring("Project configuration already exists"));
+    expect_that!(
+        stderr2.as_ref(),
+        contains_substring("Project configuration already exists")
+    );
     expect_that!(stderr2.as_ref(), contains_substring("No files written"));
 
     // 3. `config init user` initializes only user configuration, silent on success
@@ -1036,8 +1073,14 @@ fn aiw_config_init_defaults_to_project_and_user_subcommand_inits_user() {
     let stdout_user2 = String::from_utf8_lossy(&output_user2.stdout);
     let stderr_user2 = String::from_utf8_lossy(&output_user2.stderr);
     expect_that!(stdout_user2.as_ref(), eq(""));
-    expect_that!(stderr_user2.as_ref(), contains_substring("User configuration already exists"));
-    expect_that!(stderr_user2.as_ref(), contains_substring("No files written"));
+    expect_that!(
+        stderr_user2.as_ref(),
+        contains_substring("User configuration already exists")
+    );
+    expect_that!(
+        stderr_user2.as_ref(),
+        contains_substring("No files written")
+    );
 
     // 5. Run with --force overwrites silently on success
     let output3 = Command::new(env!("CARGO_BIN_EXE_aiw"))

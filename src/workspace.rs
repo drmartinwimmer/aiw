@@ -221,10 +221,15 @@ mod tests {
         std::fs::create_dir_all(&sub).expect("create_dir_all");
 
         let ws = Workspace::from_dir(&sub, "git-ws").expect("from_dir");
-        let canonical_root = repo_root.canonicalize().unwrap_or_else(|_| repo_root.to_path_buf());
+        let canonical_root = repo_root
+            .canonicalize()
+            .unwrap_or_else(|_| repo_root.to_path_buf());
         expect_that!(ws.name(), eq("git-ws"));
         expect_that!(ws.repo_root(), eq(&canonical_root));
-        expect_that!(ws.path(), eq(&canonical_root.join(".workspaces").join("git-ws")));
+        expect_that!(
+            ws.path(),
+            eq(&canonical_root.join(".workspaces").join("git-ws"))
+        );
         expect_that!(ws.exists(), is_false());
 
         let created = ws.ensure().expect("ensure");
@@ -268,7 +273,9 @@ mod tests {
 
         let ws_name = "git-ws-alpha";
         let ws = Workspace::new(repo_root, ws_name).expect("Workspace::new");
-        let canonical_root = repo_root.canonicalize().unwrap_or_else(|_| repo_root.to_path_buf());
+        let canonical_root = repo_root
+            .canonicalize()
+            .unwrap_or_else(|_| repo_root.to_path_buf());
         let expected_path = canonical_root.join(".workspaces").join(ws_name);
 
         expect_that!(ws.exists(), is_false());
@@ -340,7 +347,9 @@ mod tests {
         let res = Workspace::new(repo_root, "");
         expect_that!(
             res,
-            matches_pattern!(Err(matches_pattern!(WorkspaceError::InvalidWorkspaceName(anything()))))
+            matches_pattern!(Err(matches_pattern!(WorkspaceError::InvalidWorkspaceName(
+                anything()
+            ))))
         );
     }
 
@@ -354,7 +363,9 @@ mod tests {
             let res = Workspace::new(repo_root, bad_name);
             expect_that!(
                 res,
-                matches_pattern!(Err(matches_pattern!(WorkspaceError::InvalidWorkspaceName(anything()))))
+                matches_pattern!(Err(matches_pattern!(WorkspaceError::InvalidWorkspaceName(
+                    anything()
+                ))))
             );
         }
     }
@@ -435,7 +446,10 @@ mod tests {
         let ws = Workspace::new(repo_root, "struct-ws").expect("new Workspace");
         expect_that!(ws.name(), eq("struct-ws"));
         expect_that!(ws.repo_root(), eq(repo_root));
-        expect_that!(ws.path(), eq(&repo_root.join(".workspaces").join("struct-ws")));
+        expect_that!(
+            ws.path(),
+            eq(&repo_root.join(".workspaces").join("struct-ws"))
+        );
         expect_that!(ws.exists(), is_false());
 
         // First ensure returns Ok(true) indicating newly created

@@ -35,9 +35,7 @@ pub(crate) fn ensure_user_profile_bin_paths(cmd: &mut Command) {
         }
     }
 
-    if updated
-        && let Ok(new_path) = std::env::join_paths(paths)
-    {
+    if updated && let Ok(new_path) = std::env::join_paths(paths) {
         cmd.env("PATH", new_path);
     }
 }

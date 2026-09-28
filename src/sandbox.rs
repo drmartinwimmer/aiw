@@ -115,7 +115,9 @@ impl<'a> SandboxBuilder<'a> {
             return Some(path);
         }
 
-        self.shared_template_candidates().into_iter().find(|p| p.exists())
+        self.shared_template_candidates()
+            .into_iter()
+            .find(|p| p.exists())
     }
 
     fn shared_template_candidates(&self) -> Vec<PathBuf> {
@@ -162,12 +164,10 @@ impl<'a> SandboxBuilder<'a> {
 
         ensure_user_profile_bin_paths(&mut cmd);
 
-        // In environments where TMPDIR points to a non-existent directory, fallback to /tmp
-        if let Ok(tmp) = std::env::var("TMPDIR")
-            && !Path::new(&tmp).exists()
-        {
-            cmd.env("TMPDIR", "/tmp");
-        }
+        // Ensure TMPDIR points to the workspace directory inside the sandbox so that
+        // temporary files are created on the same filesystem/mount, preventing EXDEV
+        // (Invalid cross-device link) errors during atomic renames in fence.
+        cmd.env("TMPDIR", self.workspace_path);
 
         Ok(cmd)
     }
@@ -198,7 +198,10 @@ impl<'a> SandboxBuilder<'a> {
     #[cfg(test)]
     fn build_args(&self) -> Result<Vec<String>, SandboxError> {
         let cmd = self.build_command()?;
-        Ok(cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect())
+        Ok(cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect())
     }
 }
 
@@ -223,9 +226,9 @@ mod tests {
             if expected.is_empty() {
                 return true;
             }
-            actual.windows(expected.len()).any(|window| {
-                window.iter().zip(expected.iter()).all(|(a, b)| a == b)
-            })
+            actual
+                .windows(expected.len())
+                .any(|window| window.iter().zip(expected.iter()).all(|(a, b)| a == b))
         })
         .with_description(
             format!("contains contiguous subslice {expected:?}"),
@@ -243,15 +246,15 @@ mod tests {
         let fence_json = repo_root.join("fence.json");
         std::fs::write(&fence_json, r#"{"extends": "code"}"#).expect("write fence.json");
 
-        let cmd = vec!["agy".to_string(), "--dangerously-skip-permissions".to_string()];
+        let cmd = vec![
+            "agy".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+        ];
         let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd);
         let args = builder.build_args().expect("build_args should succeed");
 
         let fence_str = fence_json.display().to_string();
-        expect_that!(
-            &args[..],
-            contains_subslice(&["--settings", &fence_str])
-        );
+        expect_that!(&args[..], contains_subslice(&["--settings", &fence_str]));
         expect_that!(
             &args[..],
             contains_subslice(&["--", "agy", "--dangerously-skip-permissions"])
@@ -275,10 +278,7 @@ mod tests {
         let args = builder.build_args().expect("build_args");
 
         let ws_fence_str = ws_fence.display().to_string();
-        expect_that!(
-            &args[..],
-            contains_subslice(&["--settings", &ws_fence_str])
-        );
+        expect_that!(&args[..], contains_subslice(&["--settings", &ws_fence_str]));
     }
 
     #[googletest::test]
@@ -288,7 +288,10 @@ mod tests {
         let workspace_path = repo_root.join(".workspaces").join("ws");
         std::fs::create_dir_all(&workspace_path).expect("create ws");
 
-        let cmd = vec!["agy".to_string(), "--dangerously-skip-permissions".to_string()];
+        let cmd = vec![
+            "agy".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+        ];
         let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd);
         let args = builder.build_args().expect("build_args");
 
@@ -365,10 +368,7 @@ mod tests {
         let args = builder.build_args().expect("build_args");
 
         let custom_str = custom_fence.display().to_string();
-        expect_that!(
-            &args[..],
-            contains_subslice(&["--settings", &custom_str])
-        );
+        expect_that!(&args[..], contains_subslice(&["--settings", &custom_str]));
     }
 
     #[googletest::test]
@@ -378,9 +378,11 @@ mod tests {
         let workspace_path = repo_root.join(".workspaces").join("ws");
         std::fs::create_dir_all(&workspace_path).expect("create ws");
 
-        let cmd = vec!["agy".to_string(), "--dangerously-skip-permissions".to_string()];
-        let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd)
-            .with_direnv(true);
+        let cmd = vec![
+            "agy".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+        ];
+        let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd).with_direnv(true);
         let args = builder.build_args().expect("build_args");
 
         expect_that!(
@@ -404,8 +406,8 @@ mod tests {
         std::fs::create_dir_all(&workspace_path).expect("create ws");
 
         let custom_cmd = vec!["sh".to_string(), "-c".to_string(), "echo ok".to_string()];
-        let builder = SandboxBuilder::new(&workspace_path, &repo_root, &custom_cmd)
-            .with_direnv(true);
+        let builder =
+            SandboxBuilder::new(&workspace_path, &repo_root, &custom_cmd).with_direnv(true);
         let args = builder.build_args().expect("build_args");
 
         expect_that!(
@@ -443,7 +445,9 @@ mod tests {
         let res1 = builder.append_direnv_args(&mut cmd1);
         expect_that!(
             res1,
-            matches_pattern!(Err(matches_pattern!(SandboxError::InvalidArgOrder(anything()))))
+            matches_pattern!(Err(matches_pattern!(SandboxError::InvalidArgOrder(
+                anything()
+            ))))
         );
 
         // Case 2: called after command arguments already present
@@ -453,7 +457,9 @@ mod tests {
         let res2 = builder.append_direnv_args(&mut cmd2);
         expect_that!(
             res2,
-            matches_pattern!(Err(matches_pattern!(SandboxError::InvalidArgOrder(anything()))))
+            matches_pattern!(Err(matches_pattern!(SandboxError::InvalidArgOrder(
+                anything()
+            ))))
         );
 
         // Case 3: called immediately after "--" succeeds
@@ -471,14 +477,11 @@ mod tests {
         std::fs::create_dir_all(&workspace_path).expect("create ws");
 
         let custom_cmd = vec!["sh".to_string(), "-c".to_string(), "echo hi".to_string()];
-        let builder = SandboxBuilder::new(&workspace_path, &repo_root, &custom_cmd)
-            .with_direnv(true);
+        let builder =
+            SandboxBuilder::new(&workspace_path, &repo_root, &custom_cmd).with_direnv(true);
 
         let formatted = format!("{builder}");
-        expect_that!(
-            &formatted,
-            eq("fence -- direnv exec . sh -c echo hi")
-        );
+        expect_that!(&formatted, eq("fence -- direnv exec . sh -c echo hi"));
         expect_that!(&builder.to_string(), eq(&formatted));
     }
 
@@ -499,8 +502,7 @@ mod tests {
             "--dangerously-skip-permissions".to_string(),
             "--extra-flag".to_string(),
         ];
-        let builder = SandboxBuilder::for_workspace(&ws, &cmd_payload)
-            .with_direnv(true);
+        let builder = SandboxBuilder::for_workspace(&ws, &cmd_payload).with_direnv(true);
 
         let cmd = builder.build_command().expect("build_command");
         expect_that!(cmd.get_current_dir(), some(eq(ws.path())));

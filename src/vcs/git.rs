@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
-use crate::workspace::WorkspaceError;
 use super::normalize_search_dir;
+use crate::workspace::WorkspaceError;
+use std::path::{Path, PathBuf};
 
 /// Encapsulates Git repository operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -225,7 +225,9 @@ mod tests {
         init_test_git_repo(repo_root);
 
         let git = Git::from_dir(repo_root).expect("from_dir");
-        let canonical_root = repo_root.canonicalize().unwrap_or_else(|_| repo_root.to_path_buf());
+        let canonical_root = repo_root
+            .canonicalize()
+            .unwrap_or_else(|_| repo_root.to_path_buf());
         expect_that!(git.repo_root(), eq(&canonical_root));
     }
 
@@ -239,7 +241,9 @@ mod tests {
         std::fs::create_dir_all(&sub).expect("create deep dir");
 
         let git = Git::from_dir(&sub).expect("from_dir in sub");
-        let canonical_root = repo_root.canonicalize().unwrap_or_else(|_| repo_root.to_path_buf());
+        let canonical_root = repo_root
+            .canonicalize()
+            .unwrap_or_else(|_| repo_root.to_path_buf());
         expect_that!(git.repo_root(), eq(&canonical_root));
     }
 
@@ -266,17 +270,27 @@ mod tests {
         let rel_ws_path = Path::new(".workspaces").join(ws_name);
         let abs_ws_path = git.repo_root().join(&rel_ws_path);
 
-        expect_that!(git.is_workspace_registered(ws_name).expect("is_registered"), is_false());
+        expect_that!(
+            git.is_workspace_registered(ws_name).expect("is_registered"),
+            is_false()
+        );
         expect_that!(git.workspace_exists(&abs_ws_path), is_false());
 
         std::fs::create_dir_all(git.repo_root().join(".workspaces")).expect("create .workspaces");
-        git.add_workspace(&rel_ws_path, ws_name).expect("add_workspace");
+        git.add_workspace(&rel_ws_path, ws_name)
+            .expect("add_workspace");
 
-        expect_that!(git.is_workspace_registered(ws_name).expect("is_registered"), is_true());
+        expect_that!(
+            git.is_workspace_registered(ws_name).expect("is_registered"),
+            is_true()
+        );
         expect_that!(git.workspace_exists(&abs_ws_path), is_true());
 
         git.forget_workspace(ws_name).expect("forget_workspace");
-        expect_that!(git.is_workspace_registered(ws_name).expect("is_registered"), is_false());
+        expect_that!(
+            git.is_workspace_registered(ws_name).expect("is_registered"),
+            is_false()
+        );
     }
 
     #[googletest::test]
@@ -296,6 +310,9 @@ mod tests {
         // Re-adding the worktree with the same name must succeed
         let second_add = git.add_workspace(&rel_ws_path, ws_name);
         expect_that!(second_add, ok(anything()));
-        expect_that!(git.is_workspace_registered(ws_name).expect("is_registered"), is_true());
+        expect_that!(
+            git.is_workspace_registered(ws_name).expect("is_registered"),
+            is_true()
+        );
     }
 }
