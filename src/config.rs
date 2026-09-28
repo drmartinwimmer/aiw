@@ -7,19 +7,12 @@ pub const DEFAULT_AIW_TEMPLATE: &str = include_str!("../templates/fence.jsonc");
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigInitError {
+    #[error("Configuration already exists: {0}")]
+    AlreadyExists(PathBuf),
     #[error("Could not determine user configuration directory")]
     UserConfigPathNotFound,
     #[error("I/O error during config initialization: {0}")]
     Io(#[from] std::io::Error),
-}
-
-/// Result status of a configuration initialization attempt.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConfigInitStatus {
-    /// Configuration file was created (or overwritten with force).
-    Created(PathBuf),
-    /// Configuration file already exists and was not overwritten.
-    AlreadyExists(PathBuf),
 }
 
 pub struct ConfigInitializer;
@@ -32,34 +25,34 @@ impl ConfigInitializer {
     }
 
     /// Initializes user configuration (~/.config/aiw/fence.jsonc) if it does not exist yet (or if force is true).
-    pub fn init_user_config(force: bool) -> Result<ConfigInitStatus, ConfigInitError> {
+    pub fn init_user_config(force: bool) -> Result<PathBuf, ConfigInitError> {
         let path = Self::user_config_path().ok_or(ConfigInitError::UserConfigPathNotFound)?;
 
         if path.exists() && !force {
-            return Ok(ConfigInitStatus::AlreadyExists(path));
+            return Err(ConfigInitError::AlreadyExists(path));
         }
 
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(&path, DEFAULT_AIW_TEMPLATE)?;
-        Ok(ConfigInitStatus::Created(path))
+        Ok(path)
     }
 
     /// Initializes project configuration (fence.jsonc) in `target_dir` if it does not exist yet (or if force is true).
     pub fn init_project_config(
         target_dir: &Path,
         force: bool,
-    ) -> Result<ConfigInitStatus, ConfigInitError> {
+    ) -> Result<PathBuf, ConfigInitError> {
         let fence_jsonc = target_dir.join("fence.jsonc");
         let fence_json = target_dir.join("fence.json");
 
         if !force {
             if fence_jsonc.exists() {
-                return Ok(ConfigInitStatus::AlreadyExists(fence_jsonc));
+                return Err(ConfigInitError::AlreadyExists(fence_jsonc));
             }
             if fence_json.exists() {
-                return Ok(ConfigInitStatus::AlreadyExists(fence_json));
+                return Err(ConfigInitError::AlreadyExists(fence_json));
             }
         }
 
@@ -79,7 +72,7 @@ impl ConfigInitializer {
         );
 
         std::fs::write(&fence_jsonc, content)?;
-        Ok(ConfigInitStatus::Created(fence_jsonc))
+        Ok(fence_jsonc)
     }
 }
 
@@ -101,10 +94,7 @@ mod tests {
 
         let created = ConfigInitializer::init_project_config(project_dir, false)
             .expect("init_project_config");
-        expect_that!(
-            created,
-            matches_pattern!(ConfigInitStatus::Created(anything()))
-        );
+        expect_that!(created, eq(&project_dir.join("fence.jsonc")));
 
         let fence_file = project_dir.join("fence.jsonc");
         expect_that!(fence_file.exists(), is_true());
@@ -113,20 +103,16 @@ mod tests {
         expect_that!(content.as_str(), contains_substring("fence.schema.json"));
         expect_that!(content.as_str(), contains_substring("\"extends\":"));
 
-        // Second call without force returns AlreadyExists
-        let second = ConfigInitializer::init_project_config(project_dir, false)
-            .expect("second init");
+        // Second call without force returns AlreadyExists error
+        let second = ConfigInitializer::init_project_config(project_dir, false);
         expect_that!(
             second,
-            matches_pattern!(ConfigInitStatus::AlreadyExists(anything()))
+            err(matches_pattern!(ConfigInitError::AlreadyExists(_)))
         );
 
-        // Call with force returns Created
+        // Call with force returns Ok(path)
         let forced = ConfigInitializer::init_project_config(project_dir, true)
             .expect("forced init");
-        expect_that!(
-            forced,
-            matches_pattern!(ConfigInitStatus::Created(anything()))
-        );
+        expect_that!(forced, eq(&project_dir.join("fence.jsonc")));
     }
 }

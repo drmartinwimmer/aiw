@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use clap::{Parser, Subcommand};
-use crate::config::{ConfigInitError, ConfigInitStatus, ConfigInitializer};
+use crate::config::{ConfigInitError, ConfigInitializer};
 use crate::direnv::Direnv;
 use crate::herdr::{Herdr, HerdrError};
 use crate::sandbox::{SandboxBuilder, SandboxError};
@@ -178,11 +178,14 @@ impl ConfigInitProjectSubcommand {
             .map(|v| v.repo_root().to_path_buf())
             .unwrap_or(current_dir);
 
-        match ConfigInitializer::init_project_config(&project_dir, force)? {
-            ConfigInitStatus::Created(_) => {}
-            ConfigInitStatus::AlreadyExists(path) => warn_already_exists("Project", &path),
+        match ConfigInitializer::init_project_config(&project_dir, force) {
+            Ok(_) => Ok(()),
+            Err(ConfigInitError::AlreadyExists(path)) => {
+                warn_already_exists("Project", &path);
+                Ok(())
+            }
+            Err(err) => Err(err.into()),
         }
-        Ok(())
     }
 }
 
@@ -196,11 +199,14 @@ struct ConfigInitUserSubcommand {
 impl ConfigInitUserSubcommand {
     fn run(&self, global_force: bool) -> Result<(), AppError> {
         let force = self.force || global_force;
-        match ConfigInitializer::init_user_config(force)? {
-            ConfigInitStatus::Created(_) => {}
-            ConfigInitStatus::AlreadyExists(path) => warn_already_exists("User", &path),
+        match ConfigInitializer::init_user_config(force) {
+            Ok(_) => Ok(()),
+            Err(ConfigInitError::AlreadyExists(path)) => {
+                warn_already_exists("User", &path);
+                Ok(())
+            }
+            Err(err) => Err(err.into()),
         }
-        Ok(())
     }
 }
 
