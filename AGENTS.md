@@ -22,3 +22,8 @@
   - `feat: ...` for new features or CLI additions (triggers minor release).
   - `feat!: ...` or `fix!: ...` (or `BREAKING CHANGE:` in description) for breaking changes (triggers major release).
   - `docs: ...`, `refactor: ...`, `chore: ...`, `test: ...`, `ci: ...` for maintenance and internal changes.
+
+## 4. Pull Requests & Merging
+
+- Always use **Squash and merge** (or **Rebase and merge**) when merging pull requests into `main`. Never use "Create a merge commit". Standard merge commits copy the branch commit message into the merge commit body, which causes Release Please to parse both commits and generate duplicate entries in `CHANGELOG.md` and release PRs.
+- Ensure the Pull Request title adheres to the Conventional Commits specification, as GitHub defaults to using the PR title as the squashed commit subject on `main`.
