@@ -76,8 +76,10 @@ impl Direnv {
         dir.join(".envrc").exists() || dir.join(".env").exists()
     }
 
-    /// Checks if `direnv` is allowed in the specified directory by inspecting `direnv status --json`.
-    /// Returns `true` only if `direnv` finds an `.envrc` or `.env` in `dir` and its `allowed` status is 0.
+    /// Checks if `direnv` is allowed in the specified directory by inspecting `direnv status`.
+    ///
+    /// Supports both structured JSON output (`direnv status --json`, direnv >= 2.37.1)
+    /// and standard human-readable text output (`Found RC allowed 0` or `true`, direnv < 2.37.1).
     #[must_use]
     pub fn is_dir_allowed(dir: &Path) -> bool {
         if !Self::has_envrc(dir) {
@@ -89,13 +91,31 @@ impl Direnv {
         cmd.current_dir(dir);
         ensure_user_profile_bin_paths(&mut cmd);
 
-        let Ok(output) = cmd.output() else {
-            return false;
-        };
-        if !output.status.success() {
-            return false;
+        if let Ok(output) = cmd.output()
+            && output.status.success()
+            && let Some(allowed) = Self::parse_direnv_status_output(&output.stdout)
+        {
+            return allowed;
         }
 
+        let mut fallback_cmd = Command::new("direnv");
+        fallback_cmd.args(["status"]);
+        fallback_cmd.current_dir(dir);
+        ensure_user_profile_bin_paths(&mut fallback_cmd);
+
+        if let Ok(output) = fallback_cmd.output()
+            && output.status.success()
+            && let Some(allowed) = Self::parse_direnv_status_output(&output.stdout)
+        {
+            return allowed;
+        }
+
+        false
+    }
+
+    /// Parses the output of `direnv status` (either JSON or plain text format)
+    /// and determines whether the found RC file is allowed.
+    pub(crate) fn parse_direnv_status_output(output: &[u8]) -> Option<bool> {
         #[derive(serde::Deserialize)]
         struct DirenvStatus {
             state: Option<DirenvState>,
@@ -109,14 +129,27 @@ impl Direnv {
 
         #[derive(serde::Deserialize)]
         struct FoundRc {
-            allowed: i32,
+            allowed: serde_json::Value,
         }
 
-        serde_json::from_slice::<DirenvStatus>(&output.stdout)
-            .ok()
-            .and_then(|s| s.state)
-            .and_then(|s| s.found_rc)
-            .is_some_and(|rc| rc.allowed == 0)
+        if let Ok(status) = serde_json::from_slice::<DirenvStatus>(output)
+            && let Some(found_rc) = status.state.and_then(|s| s.found_rc)
+        {
+            let is_allowed =
+                found_rc.allowed.as_i64() == Some(0) || found_rc.allowed.as_bool() == Some(true);
+            return Some(is_allowed);
+        }
+
+        let text = String::from_utf8_lossy(output);
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if let Some(val) = trimmed.strip_prefix("Found RC allowed") {
+                let val = val.trim().trim_start_matches(':').trim();
+                return Some(val == "0" || val.eq_ignore_ascii_case("true"));
+            }
+        }
+
+        None
     }
 
     /// If the directory contains `.envrc` or `.env`, runs `direnv allow` on that directory.
@@ -227,5 +260,82 @@ mod tests {
         expect_that!(allowed_direnv.is_allowed(), is_true());
         allowed_direnv.allow_workspace(&ws_dir);
         expect_that!(Direnv::is_dir_allowed(&ws_dir), is_true());
+    }
+
+    #[googletest::test]
+    fn parse_direnv_status_output_handles_json_and_text_formats() {
+        // 1. Modern JSON format with integer allowed (direnv >= 2.37.1)
+        let json_allowed = br#"{
+            "state": {
+                "foundRC": {
+                    "allowed": 0,
+                    "path": "/project/.envrc"
+                }
+            }
+        }"#;
+        expect_that!(
+            Direnv::parse_direnv_status_output(json_allowed),
+            eq(Some(true))
+        );
+
+        let json_unallowed = br#"{
+            "state": {
+                "foundRC": {
+                    "allowed": 1,
+                    "path": "/project/.envrc"
+                }
+            }
+        }"#;
+        expect_that!(
+            Direnv::parse_direnv_status_output(json_unallowed),
+            eq(Some(false))
+        );
+
+        // 2. JSON format with boolean allowed
+        let json_bool_allowed = br#"{"state":{"foundRC":{"allowed":true}}}"#;
+        expect_that!(
+            Direnv::parse_direnv_status_output(json_bool_allowed),
+            eq(Some(true))
+        );
+
+        let json_bool_unallowed = br#"{"state":{"foundRC":{"allowed":false}}}"#;
+        expect_that!(
+            Direnv::parse_direnv_status_output(json_bool_unallowed),
+            eq(Some(false))
+        );
+
+        // 3. Human-readable text format with integer (direnv ~ 2.32 - 2.36)
+        let text_allowed = b"direnv exec path /usr/bin/direnv\nFound RC path /app/.envrc\nFound RC allowed 0\nFound RC allowPath /allow/hash";
+        expect_that!(
+            Direnv::parse_direnv_status_output(text_allowed),
+            eq(Some(true))
+        );
+
+        let text_unallowed = b"direnv exec path /usr/bin/direnv\nFound RC path /app/.envrc\nFound RC allowed 1\nFound RC allowPath /allow/hash";
+        expect_that!(
+            Direnv::parse_direnv_status_output(text_unallowed),
+            eq(Some(false))
+        );
+
+        // 4. Legacy text format with boolean
+        let text_legacy_allowed = b"Found RC path /app/.envrc\nFound RC allowed true\n";
+        expect_that!(
+            Direnv::parse_direnv_status_output(text_legacy_allowed),
+            eq(Some(true))
+        );
+
+        let text_legacy_unallowed = b"Found RC path /app/.envrc\nFound RC allowed false\n";
+        expect_that!(
+            Direnv::parse_direnv_status_output(text_legacy_unallowed),
+            eq(Some(false))
+        );
+
+        // 5. Loaded RC present but no Found RC (should return None, not be confused with Loaded RC)
+        let text_loaded_only = b"Loaded RC allowed 0\nLoaded RC path /app/.envrc\n";
+        expect_that!(Direnv::parse_direnv_status_output(text_loaded_only), none());
+
+        // 6. Non-matching or empty output
+        expect_that!(Direnv::parse_direnv_status_output(b""), none());
+        expect_that!(Direnv::parse_direnv_status_output(b"random text"), none());
     }
 }
