@@ -3,8 +3,8 @@
 > **An easy-to-use, opinionated tool for creating sandboxed AI workspaces.**
 
 [![CI](https://github.com/drmartinwimmer/aiw/actions/workflows/ci.yml/badge.svg)](https://github.com/drmartinwimmer/aiw/actions/workflows/ci.yml)
-[![Crates.io](https://img.shields.io/crates/v/aiw.svg)](https://crates.io/crates/aiw)
-[![Docs.rs](https://docs.rs/aiw/badge.svg)](https://docs.rs/aiw)
+[![Crates.io](https://img.shields.io/crates/v/ai-workspace.svg)](https://crates.io/crates/ai-workspace)
+[![Docs.rs](https://docs.rs/ai-workspace/badge.svg)](https://docs.rs/ai-workspace)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Built with Rust](https://img.shields.io/badge/rust-2024%20edition-orange.svg)](https://www.rust-lang.org/)
 
@@ -47,12 +47,19 @@ Running autonomous coding agents directly inside your primary working copy carri
 
 ## Installation
 
+### From crates.io
+
+```bash
+cargo install ai-workspace
+aiw config init user
+```
+
 ### From Source (Cargo)
 
 Ensure you have Rust and Cargo installed (edition 2024 supported):
 
 ```bash
-git clone https://github.com/<your-username>/aiw.git
+git clone https://github.com/drmartinwimmer/aiw.git
 cd aiw
 cargo install --path .
 aiw config init user
@@ -70,7 +77,7 @@ nix develop
 nix build
 
 # Run directly
-nix run github:<your-username>/aiw -- agy my-workspace --dry-run
+nix run github:drmartinwimmer/aiw -- agy my-workspace --dry-run
 ```
 
 ---

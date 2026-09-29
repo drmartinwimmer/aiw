@@ -12,8 +12,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "aiw"
-version = "0.1.2"
+name = "ai-workspace"
+version = "0.1.3"
 dependencies = [
  "clap",
  "directories",

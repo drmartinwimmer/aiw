@@ -1,6 +1,6 @@
 [package]
-name = "aiw"
-version = "0.1.2"
+name = "ai-workspace"
+version = "0.1.3"
 edition = "2024"
 description = "An easy to use, opinionated tool for creating sandboxed AI workspaces"
 license = "MIT"
@@ -8,9 +8,17 @@ readme = "README.md"
 authors = ["Martin Wimmer <martinw1982@gmail.com>"]
 repository = "https://github.com/drmartinwimmer/aiw"
 homepage = "https://github.com/drmartinwimmer/aiw"
-documentation = "https://docs.rs/aiw"
+documentation = "https://docs.rs/ai-workspace"
 keywords = ["ai", "sandbox", "jujutsu", "fence", "workspace"]
 categories = ["command-line-utilities", "development-tools"]
+
+[lib]
+name = "aiw"
+path = "src/lib.rs"
+
+[[bin]]
+name = "aiw"
+path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.6", features = ["derive"] }
