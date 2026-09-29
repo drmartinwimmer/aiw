@@ -175,7 +175,7 @@ aiw config init user
 _(When installing via Nix/Home Manager, it is installed in `$out/share/aiw/fence.jsonc` and discovered via `$XDG_DATA_DIRS`. When installing via `cargo install`, run `aiw config init user` to place it in `~/.config/aiw/fence.jsonc`.)_
 
 - **Zero-Config Workspaces**: When no `fence.jsonc` or `fence.json` exists in the local workspace or repository root, `aiw` automatically discovers and defaults to `fence.jsonc` in `~/.config/aiw/fence.jsonc` (or `$XDG_DATA_DIRS/aiw/fence.jsonc`) and passes it to Fence.
-- **Hardened Agent Scope**: Extends Fence's baseline `code` template while explicitly restricting network access to essential Google agent and authentication endpoints (`accounts.google.com`, `aicode.googleapis.com`, `aiplatform.googleapis.com`, `cloudcode-pa.googleapis.com`, `daily-cloudcode-pa.googleapis.com`, `oauth2.googleapis.com`, `www.googleapis.com`) without opening broad wildcards.
+- **Hardened Agent Scope**: Extends Fence's baseline `code` template while explicitly restricting network access to essential Google agent and authentication endpoints (`accounts.google.com`, `aicode.googleapis.com`, `aiplatform.googleapis.com`, `cloudcode-pa.googleapis.com`, `daily-cloudcode-pa.googleapis.com`, `lh1..lh6.googleusercontent.com`, `oauth2.googleapis.com`, `www.googleapis.com`) without opening broad wildcards.
 - **Jujutsu & Git Workspace Paths**: Grants write access to `.jj/**` and `.git/**` in the active workspace, as well as `../../.jj/**` and `../../.git/**` at the repository root where Jujutsu/Git stores live.
 - **Credential & State Persistence**: Preserves Antigravity agent transcripts and cache in `~/.gemini/**` and keyring credentials in `~/.local/share/keyrings/**`.
 

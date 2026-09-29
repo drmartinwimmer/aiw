@@ -47,13 +47,20 @@
     // Specific endpoints required by Google Antigravity (agy). Broad wildcards
     // such as "*.googleusercontent.com" (which hosts arbitrary user-uploaded content)
     // and "*.google.com" are deliberately omitted to avoid prompt-injection
-    // data exfiltration or payload retrieval.
+    // data exfiltration or payload retrieval. Avatar CDN hosts (lh*.googleusercontent.com)
+    // are explicitly enumerated for user profile picture fetching.
     "allowedDomains": [
       "accounts.google.com",
       "aicode.googleapis.com",
       "aiplatform.googleapis.com",
       "cloudcode-pa.googleapis.com",
       "daily-cloudcode-pa.googleapis.com",
+      "lh1.googleusercontent.com",
+      "lh2.googleusercontent.com",
+      "lh3.googleusercontent.com",
+      "lh4.googleusercontent.com",
+      "lh5.googleusercontent.com",
+      "lh6.googleusercontent.com",
       "oauth2.googleapis.com",
       "www.googleapis.com"
       // Note: generativelanguage.googleapis.com is already included in "code" template

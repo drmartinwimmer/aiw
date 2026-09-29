@@ -111,6 +111,12 @@ fn write_test_fence_json(repo_root: &Path) {
       "aiplatform.googleapis.com",
       "cloudcode-pa.googleapis.com",
       "daily-cloudcode-pa.googleapis.com",
+      "lh1.googleusercontent.com",
+      "lh2.googleusercontent.com",
+      "lh3.googleusercontent.com",
+      "lh4.googleusercontent.com",
+      "lh5.googleusercontent.com",
+      "lh6.googleusercontent.com",
       "oauth2.googleapis.com",
       "www.googleapis.com"
     ]
