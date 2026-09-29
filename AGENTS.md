@@ -14,10 +14,11 @@
 - Keep the codebase lightweight without unnecessary dependencies.
 - Follow Rust best practices and maintain clean compiler/clippy runs.
 
-## 3. Versioning & Changelog
+## 3. Commit Messages & Conventional Commits
 
-- Increment the crate version in `Cargo.toml` (according to Rust SemVer rules) based on changes compared to `main`:
-  - Increment patch version for backwards-compatible bug fixes, refactoring, and maintenance.
-  - Increment minor version for new backwards-compatible functionality or CLI additions.
-  - Increment major version for breaking public API or CLI behavior changes.
-- Maintain a changelog (`CHANGELOG.md`) that summarizes the changes between versions.
+- Do NOT manually bump crate versions in `Cargo.toml` or manually edit `CHANGELOG.md`. Releases, SemVer version bumps, and changelog updates are automated via Release Please.
+- Always write commit messages adhering to the [Conventional Commits](https://www.conventionalcommits.org/) specification so Release Please can compute the correct SemVer release:
+  - `fix: ...` for bug fixes (triggers patch release).
+  - `feat: ...` for new features or CLI additions (triggers minor release).
+  - `feat!: ...` or `fix!: ...` (or `BREAKING CHANGE:` in description) for breaking changes (triggers major release).
+  - `docs: ...`, `refactor: ...`, `chore: ...`, `test: ...`, `ci: ...` for maintenance and internal changes.
