@@ -131,6 +131,14 @@ impl Vcs {
             VcsKind::Git(git) => git.workspace_exists(workspace_path),
         }
     }
+
+    /// Lists all available workspaces managed by this VCS.
+    pub fn list_workspaces(&self) -> Result<Vec<String>, WorkspaceError> {
+        match &self.kind {
+            VcsKind::Jj(jj) => jj.list_workspaces(),
+            VcsKind::Git(git) => git.list_workspaces(),
+        }
+    }
 }
 
 #[cfg(test)]

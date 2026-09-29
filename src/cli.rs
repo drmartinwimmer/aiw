@@ -30,6 +30,9 @@ enum Commands {
     Forget(ForgetCommand),
     /// Manage aiw configuration
     Config(ConfigCommand),
+    /// List all available workspaces
+    #[command(alias = "ls")]
+    List(ListCommand),
 }
 
 impl Commands {
@@ -38,7 +41,22 @@ impl Commands {
             Commands::Agy(cmd) => cmd.run(),
             Commands::Forget(cmd) => cmd.run(),
             Commands::Config(cmd) => cmd.run(),
+            Commands::List(cmd) => cmd.run(),
         }
+    }
+}
+
+#[derive(clap::Args, Debug, PartialEq, Eq)]
+struct ListCommand {}
+
+impl ListCommand {
+    fn run(&self) -> Result<(), AppError> {
+        let current_dir = std::env::current_dir()?;
+        let workspaces = Workspace::list_from_dir(&current_dir)?;
+        for ws in workspaces {
+            println!("{}", ws.name());
+        }
+        Ok(())
     }
 }
 
@@ -392,5 +410,17 @@ mod tests {
         } else {
             expect_that!(false, is_true());
         }
+    }
+
+    #[googletest::test]
+    fn parse_list_subcommand_succeeds() {
+        let cli = Cli::try_parse_from(["aiw", "list"]).expect("parse list");
+        expect_that!(&cli.command, eq(&Commands::List(ListCommand {})));
+    }
+
+    #[googletest::test]
+    fn parse_list_subcommand_alias_ls_succeeds() {
+        let cli = Cli::try_parse_from(["aiw", "ls"]).expect("parse ls");
+        expect_that!(&cli.command, eq(&Commands::List(ListCommand {})));
     }
 }

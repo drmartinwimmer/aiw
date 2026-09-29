@@ -47,9 +47,15 @@ impl Git {
         }
 
         let path = PathBuf::from(trimmed);
-        Ok(Self {
-            repo_root: path.canonicalize().unwrap_or(path),
-        })
+        let mut repo_root = path.canonicalize().unwrap_or(path);
+        if let Some(parent) = repo_root.parent()
+            && parent.file_name() == Some(std::ffi::OsStr::new(".workspaces"))
+            && let Some(grandparent) = parent.parent()
+            && grandparent.join(".git").exists()
+        {
+            repo_root = grandparent.to_path_buf();
+        }
+        Ok(Self { repo_root })
     }
 
     /// Returns the repository root path.
@@ -174,6 +180,59 @@ impl Git {
     #[must_use]
     pub fn workspace_exists(&self, workspace_path: &Path) -> bool {
         workspace_path.join(".git").exists()
+    }
+
+    /// Lists all available workspaces in the Git repository.
+    pub fn list_workspaces(&self) -> Result<Vec<String>, WorkspaceError> {
+        // Prune stale worktrees first so missing directories are not reported as registered
+        drop(
+            std::process::Command::new("git")
+                .args(["--no-pager", "worktree", "prune"])
+                .current_dir(&self.repo_root)
+                .output(),
+        );
+
+        let output = std::process::Command::new("git")
+            .args(["--no-pager", "worktree", "list", "--porcelain"])
+            .current_dir(&self.repo_root)
+            .output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stderr_lower = stderr.to_lowercase();
+            if stderr_lower.contains("not a git repository") {
+                return Err(WorkspaceError::NotInGitRepo);
+            }
+            return Err(WorkspaceError::GitCommandFailed(stderr.trim().to_string()));
+        }
+
+        let workspaces_dir = self.repo_root.join(".workspaces");
+        let workspaces_dir_canonical = workspaces_dir.canonicalize().ok();
+
+        let mut workspaces = Vec::new();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            if let Some(rest) = line.strip_prefix("worktree ") {
+                let wt_path = PathBuf::from(rest.trim());
+                let is_in_workspaces = if let Some(parent) = wt_path.parent() {
+                    parent == workspaces_dir
+                        || (workspaces_dir_canonical.is_some()
+                            && parent.canonicalize().ok() == workspaces_dir_canonical)
+                        || parent.ends_with(".workspaces")
+                } else {
+                    false
+                };
+
+                if is_in_workspaces
+                    && let Some(file_name) = wt_path.file_name().and_then(|n| n.to_str())
+                    && crate::workspace::validate_workspace_name(file_name).is_ok()
+                    && self.workspace_exists(&wt_path)
+                {
+                    workspaces.push(file_name.to_string());
+                }
+            }
+        }
+        Ok(workspaces)
     }
 }
 
@@ -314,5 +373,43 @@ mod tests {
             git.is_workspace_registered(ws_name).expect("is_registered"),
             is_true()
         );
+    }
+
+    #[googletest::test]
+    fn git_list_workspaces_lists_added_worktrees() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = dir.path();
+        init_test_git_repo(repo_root);
+
+        let git = Git::from_dir(repo_root).expect("from_dir");
+        let initial = git.list_workspaces().expect("list initial");
+        expect_that!(initial, is_empty());
+
+        let rel1 = Path::new(".workspaces").join("git-ws-1");
+        let rel2 = Path::new(".workspaces").join("git-ws-2");
+        std::fs::create_dir_all(git.repo_root().join(".workspaces")).expect("create .workspaces");
+        git.add_workspace(&rel1, "git-ws-1").expect("add git-ws-1");
+        git.add_workspace(&rel2, "git-ws-2").expect("add git-ws-2");
+
+        let listed = git.list_workspaces().expect("list after adding");
+        expect_that!(
+            listed,
+            unordered_elements_are![eq("git-ws-1"), eq("git-ws-2")]
+        );
+
+        // When inside a worktree, Git::from_dir still resolves to the main repo root
+        let ws1_path = git.repo_root().join(&rel1);
+        let git_from_ws = Git::from_dir(&ws1_path).expect("from_dir inside ws");
+        expect_that!(git_from_ws.repo_root(), eq(git.repo_root()));
+        let listed_from_ws = git_from_ws.list_workspaces().expect("list from ws");
+        expect_that!(
+            listed_from_ws,
+            unordered_elements_are![eq("git-ws-1"), eq("git-ws-2")]
+        );
+
+        // After forgetting git-ws-1, only git-ws-2 remains
+        git.forget_workspace("git-ws-1").expect("forget ws-1");
+        let listed_after_forget = git.list_workspaces().expect("list after forget");
+        expect_that!(listed_after_forget, elements_are![eq("git-ws-2")]);
     }
 }
