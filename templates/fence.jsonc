@@ -6,9 +6,7 @@
     // coreutils binaries (e.g. NixOS or Busybox). On these systems, chroot shares
     // an inode/binary with essential utilities like cat, head, and tail; denying
     // chroot at runtime would collaterally block those essential utilities.
-    "acceptSharedBinaryCannotRuntimeDeny": [
-      "chroot"
-    ]
+    "acceptSharedBinaryCannotRuntimeDeny": ["chroot"],
   },
 
   // Inherit Fence's "code" template, providing baseline permissions for AI coding
@@ -16,6 +14,12 @@
   "extends": "code",
 
   "filesystem": {
+    // Read permissions beyond standard FHS system paths.
+    // On NixOS and systems using Nix, executables (like bash and agy), shared libraries,
+    // and the dynamic linker reside under /nix/store. Fence's Landlock supervisor
+    // restricts unlisted paths by default, so /nix must be explicitly readable.
+    "allowRead": ["/nix"],
+
     "allowWrite": [
       // Current project directory
       ".",
@@ -35,8 +39,8 @@
       "~/.gemini/**",
 
       // OS keyring access for credential storage during agent authentication
-      "~/.local/share/keyrings/**"
-    ]
+      "~/.local/share/keyrings/**",
+    ],
   },
 
   "network": {
@@ -62,8 +66,8 @@
       "lh5.googleusercontent.com",
       "lh6.googleusercontent.com",
       "oauth2.googleapis.com",
-      "www.googleapis.com"
+      "www.googleapis.com",
       // Note: generativelanguage.googleapis.com is already included in "code" template
-    ]
-  }
+    ],
+  },
 }
