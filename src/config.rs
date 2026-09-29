@@ -88,6 +88,7 @@ mod tests {
             DEFAULT_AIW_TEMPLATE,
             contains_substring("\"extends\": \"code\"")
         );
+        expect_that!(DEFAULT_AIW_TEMPLATE, contains_substring("\"/nix\""));
     }
 
     #[googletest::test]
