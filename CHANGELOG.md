@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1](https://github.com/drmartinwimmer/aiw/compare/ai-workspace-v0.2.0...ai-workspace-v0.2.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* allow reading /nix in default fence template for NixOS ([ef90fa6](https://github.com/drmartinwimmer/aiw/commit/ef90fa6f8632648433217ff2a1a648b81753aafa))
+* allow reading /nix in default fence template for NixOS ([640b433](https://github.com/drmartinwimmer/aiw/commit/640b433852ff1807f63bcc298eba1e4f4decfb61)), closes [#7](https://github.com/drmartinwimmer/aiw/issues/7)
+
 ## [0.2.0](https://github.com/drmartinwimmer/aiw/compare/ai-workspace-v0.1.3...ai-workspace-v0.2.0) (2026-09-29)
 
 
