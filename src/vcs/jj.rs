@@ -1,4 +1,5 @@
 use super::normalize_search_dir;
+use crate::tools::JjCommand;
 use crate::workspace::WorkspaceError;
 use std::path::{Path, PathBuf};
 
@@ -6,6 +7,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Jj {
     repo_root: PathBuf,
+    workspace_root: PathBuf,
 }
 
 impl Jj {
@@ -16,46 +18,20 @@ impl Jj {
             return Err(WorkspaceError::NotInJjRepo);
         }
 
-        let output = std::process::Command::new("jj")
-            .args(["--no-pager", "root"])
+        let workspace_root = JjCommand::new()
             .current_dir(&normalized)
-            .output();
+            .workspace_root(None)?;
 
-        let output = match output {
-            Ok(out) => out,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                return Err(WorkspaceError::NotInJjRepo);
-            }
-            Err(err) => return Err(WorkspaceError::Io(err)),
-        };
+        // The default workspace always corresponds to the root Jujutsu repository
+        let repo_root = JjCommand::new()
+            .current_dir(&workspace_root)
+            .workspace_root(Some("default"))
+            .unwrap_or_else(|_| workspace_root.clone());
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stderr_lower = stderr.to_lowercase();
-            if stderr_lower.contains("no jj repo") || stderr_lower.contains("there is no jj repo") {
-                return Err(WorkspaceError::NotInJjRepo);
-            }
-            return Err(WorkspaceError::JjCommandFailed(stderr.trim().to_string()));
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let trimmed = stdout.trim();
-        if trimmed.is_empty() {
-            return Err(WorkspaceError::JjCommandFailed(
-                "Empty output from jj root".to_string(),
-            ));
-        }
-
-        let mut repo_root = PathBuf::from(trimmed);
-        if let Some(parent) = repo_root.parent()
-            && parent.file_name() == Some(std::ffi::OsStr::new(".workspaces"))
-            && let Some(grandparent) = parent.parent()
-            && grandparent.join(".jj").exists()
-        {
-            repo_root = grandparent.to_path_buf();
-        }
-
-        Ok(Self { repo_root })
+        Ok(Self {
+            repo_root,
+            workspace_root,
+        })
     }
 
     /// Returns the repository root path.
@@ -64,28 +40,19 @@ impl Jj {
         &self.repo_root
     }
 
+    /// Returns the active workspace root path.
+    #[must_use]
+    pub fn workspace_root(&self) -> &Path {
+        &self.workspace_root
+    }
+
     /// Checks if a Jujutsu workspace with `workspace_name` is registered.
     pub fn is_workspace_registered(&self, workspace_name: &str) -> Result<bool, WorkspaceError> {
-        let output = std::process::Command::new("jj")
-            .args(["--no-pager", "workspace", "list"])
+        let entries = JjCommand::new()
             .current_dir(&self.repo_root)
-            .output()?;
+            .workspace_list()?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stderr_lower = stderr.to_lowercase();
-            if stderr_lower.contains("no jj repo") || stderr_lower.contains("there is no jj repo") {
-                return Err(WorkspaceError::NotInJjRepo);
-            }
-            return Err(WorkspaceError::JjCommandFailed(stderr.trim().to_string()));
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(stdout.lines().any(|line| {
-            line.split_once(':')
-                .map(|(name, _)| name.trim() == workspace_name)
-                .unwrap_or(false)
-        }))
+        Ok(entries.iter().any(|entry| entry.name == workspace_name))
     }
 
     /// Adds a new workspace to Jujutsu.
@@ -94,42 +61,16 @@ impl Jj {
         rel_workspace_path: &Path,
         workspace_name: &str,
     ) -> Result<(), WorkspaceError> {
-        let output = std::process::Command::new("jj")
-            .args(["--no-pager", "workspace", "add"])
-            .arg(rel_workspace_path)
-            .args(["--name", workspace_name])
+        JjCommand::new()
             .current_dir(&self.repo_root)
-            .output()?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stderr_lower = stderr.to_lowercase();
-            if stderr_lower.contains("no jj repo") || stderr_lower.contains("there is no jj repo") {
-                return Err(WorkspaceError::NotInJjRepo);
-            }
-            return Err(WorkspaceError::JjCommandFailed(stderr.trim().to_string()));
-        }
-
-        Ok(())
+            .workspace_add(rel_workspace_path, workspace_name)
     }
 
     /// Forgets a workspace in Jujutsu.
     pub fn forget_workspace(&self, workspace_name: &str) -> Result<(), WorkspaceError> {
-        let output = std::process::Command::new("jj")
-            .args(["--no-pager", "workspace", "forget", workspace_name])
+        JjCommand::new()
             .current_dir(&self.repo_root)
-            .output()?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stderr_lower = stderr.to_lowercase();
-            if stderr_lower.contains("no jj repo") || stderr_lower.contains("there is no jj repo") {
-                return Err(WorkspaceError::NotInJjRepo);
-            }
-            return Err(WorkspaceError::JjCommandFailed(stderr.trim().to_string()));
-        }
-
-        Ok(())
+            .workspace_forget(workspace_name)
     }
 
     /// Checks if a Jujutsu workspace exists on disk by checking for `.jj`.
@@ -140,110 +81,34 @@ impl Jj {
 
     /// Lists all available workspaces in the Jujutsu repository.
     pub fn list_workspaces(&self) -> Result<Vec<String>, WorkspaceError> {
-        let output = std::process::Command::new("jj")
-            .args([
-                "--no-pager",
-                "workspace",
-                "list",
-                "-T",
-                r#"name ++ "\t" ++ root ++ "\n""#,
-            ])
+        let entries = JjCommand::new()
             .current_dir(&self.repo_root)
-            .output();
+            .workspace_list()?;
 
-        let output = match output {
-            Ok(out) if out.status.success() => out,
-            Ok(out) => {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                let stderr_lower = stderr.to_lowercase();
-                if stderr_lower.contains("no jj repo")
-                    || stderr_lower.contains("there is no jj repo")
-                {
-                    return Err(WorkspaceError::NotInJjRepo);
-                }
-                let fallback = std::process::Command::new("jj")
-                    .args(["--no-pager", "workspace", "list"])
-                    .current_dir(&self.repo_root)
-                    .output()?;
-                if !fallback.status.success() {
-                    let fb_stderr = String::from_utf8_lossy(&fallback.stderr);
-                    let fb_lower = fb_stderr.to_lowercase();
-                    if fb_lower.contains("no jj repo") || fb_lower.contains("there is no jj repo") {
-                        return Err(WorkspaceError::NotInJjRepo);
-                    }
-                    return Err(WorkspaceError::JjCommandFailed(
-                        fb_stderr.trim().to_string(),
-                    ));
-                }
-                return self.parse_default_workspace_list(&fallback.stdout);
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                return Err(WorkspaceError::NotInJjRepo);
-            }
-            Err(err) => return Err(WorkspaceError::Io(err)),
-        };
-
-        self.parse_templated_workspace_list(&output.stdout)
-    }
-
-    fn parse_templated_workspace_list(
-        &self,
-        stdout_bytes: &[u8],
-    ) -> Result<Vec<String>, WorkspaceError> {
-        let stdout = String::from_utf8_lossy(stdout_bytes);
-        let mut workspaces = Vec::new();
         let workspaces_dir = self.repo_root.join(".workspaces");
         let workspaces_dir_canonical = workspaces_dir.canonicalize().ok();
 
-        for line in stdout.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            let Some((name, root_str)) = line.split_once('\t') else {
-                continue;
-            };
-            let name = name.trim();
-            if name == "default" || crate::workspace::validate_workspace_name(name).is_err() {
-                continue;
-            }
+        let workspaces = entries
+            .into_iter()
+            .filter(|entry| entry.name != "default")
+            .filter(|entry| {
+                entry
+                    .root
+                    .parent()
+                    .map(|parent| {
+                        parent == workspaces_dir
+                            || (workspaces_dir_canonical.is_some()
+                                && parent.canonicalize().ok() == workspaces_dir_canonical)
+                            || parent.ends_with(".workspaces")
+                    })
+                    .unwrap_or_default()
+            })
+            .filter_map(|entry| {
+                crate::workspace::validate_workspace_name(&entry.name).ok()?;
+                self.workspace_exists(&entry.root).then_some(entry.name)
+            })
+            .collect();
 
-            let root_path = PathBuf::from(root_str.trim());
-            let is_in_workspaces = if let Some(parent) = root_path.parent() {
-                parent == workspaces_dir
-                    || (workspaces_dir_canonical.is_some()
-                        && parent.canonicalize().ok() == workspaces_dir_canonical)
-                    || parent.ends_with(".workspaces")
-            } else {
-                false
-            };
-
-            if is_in_workspaces && self.workspace_exists(&root_path) {
-                workspaces.push(name.to_string());
-            }
-        }
-        Ok(workspaces)
-    }
-
-    fn parse_default_workspace_list(
-        &self,
-        stdout_bytes: &[u8],
-    ) -> Result<Vec<String>, WorkspaceError> {
-        let stdout = String::from_utf8_lossy(stdout_bytes);
-        let mut workspaces = Vec::new();
-        for line in stdout.lines() {
-            let Some((name, _)) = line.split_once(':') else {
-                continue;
-            };
-            let name = name.trim();
-            if name == "default" || crate::workspace::validate_workspace_name(name).is_err() {
-                continue;
-            }
-            let ws_path = self.repo_root.join(".workspaces").join(name);
-            if self.workspace_exists(&ws_path) {
-                workspaces.push(name.to_string());
-            }
-        }
         Ok(workspaces)
     }
 }

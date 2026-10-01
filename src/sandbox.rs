@@ -3,7 +3,7 @@ use std::process::{Command, ExitStatus};
 
 #[cfg(not(test))]
 use crate::config::ConfigInitializer;
-use crate::direnv::ensure_user_profile_bin_paths;
+use crate::tools::ensure_user_profile_bin_paths;
 use crate::workspace::Workspace;
 
 #[derive(Debug, thiserror::Error)]
@@ -98,36 +98,33 @@ impl<'a> SandboxBuilder<'a> {
     }
 
     fn resolve_settings_path(&self) -> Option<PathBuf> {
-        if let Some(path) = self.settings_path
-            && path.exists()
-        {
-            return Some(path.to_path_buf());
-        }
-
-        let local_candidates = [
-            self.workspace_path.join("fence.jsonc"),
-            self.workspace_path.join("fence.json"),
-            self.repo_root.join("fence.jsonc"),
-            self.repo_root.join("fence.json"),
-        ];
-
-        if let Some(path) = local_candidates.into_iter().find(|p| p.exists()) {
-            return Some(path);
-        }
-
-        self.shared_template_candidates()
-            .into_iter()
-            .find(|p| p.exists())
+        self.settings_path
+            .filter(|p| p.exists())
+            .map(Path::to_path_buf)
+            .or_else(|| {
+                [
+                    self.workspace_path.join("fence.jsonc"),
+                    self.workspace_path.join("fence.json"),
+                    self.repo_root.join("fence.jsonc"),
+                    self.repo_root.join("fence.json"),
+                ]
+                .into_iter()
+                .find(|p| p.exists())
+            })
+            .or_else(|| {
+                self.shared_template_candidates()
+                    .into_iter()
+                    .find(|p| p.exists())
+            })
     }
 
     fn shared_template_candidates(&self) -> Vec<PathBuf> {
         #[cfg(test)]
         {
-            if let Some(ref dir) = self.shared_config_dir {
-                vec![dir.join("fence.jsonc")]
-            } else {
-                Vec::new()
-            }
+            self.shared_config_dir
+                .as_ref()
+                .map(|dir| vec![dir.join("fence.jsonc")])
+                .unwrap_or_default()
         }
 
         #[cfg(not(test))]

@@ -448,7 +448,8 @@ fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
     .expect("write .envrc");
 
     // Allow direnv in workspace for direct SandboxBuilder execution
-    aiw::direnv::Direnv::allow_dir(&ws_path);
+    let direnv = aiw::direnv::Direnv::new(repo_root);
+    direnv.allow_workspace(&ws_path);
 
     let sh_bin = if Path::new("/bin/sh").exists() {
         "/bin/sh"

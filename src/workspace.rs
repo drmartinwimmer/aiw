@@ -108,6 +108,12 @@ impl Workspace {
         self.vcs.repo_root()
     }
 
+    /// Returns the current worktree or workspace root path of the enclosing repository.
+    #[must_use]
+    pub fn worktree_root(&self) -> &Path {
+        self.vcs.worktree_root()
+    }
+
     /// Returns `true` if the workspace currently exists on disk and contains appropriate VCS metadata.
     #[must_use]
     pub fn exists(&self) -> bool {

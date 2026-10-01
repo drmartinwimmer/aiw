@@ -1,4 +1,4 @@
-use crate::direnv::ensure_user_profile_bin_paths;
+use crate::tools::ensure_user_profile_bin_paths;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

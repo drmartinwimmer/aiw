@@ -1,4 +1,5 @@
 use super::normalize_search_dir;
+use crate::tools::GitCommand;
 use crate::workspace::WorkspaceError;
 use std::path::{Path, PathBuf};
 
@@ -6,6 +7,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Git {
     repo_root: PathBuf,
+    worktree_root: PathBuf,
 }
 
 impl Git {
@@ -16,46 +18,22 @@ impl Git {
             return Err(WorkspaceError::NotInGitRepo);
         }
 
-        let output = std::process::Command::new("git")
-            .args(["--no-pager", "rev-parse", "--show-toplevel"])
-            .current_dir(&normalized)
-            .output();
+        let worktree_root = GitCommand::new().current_dir(&normalized).show_toplevel()?;
 
-        let output = match output {
-            Ok(out) => out,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                return Err(WorkspaceError::NotInGitRepo);
-            }
-            Err(err) => return Err(WorkspaceError::Io(err)),
-        };
+        // Discover worktrees via git; the first entry in git worktree list is always the primary repository root
+        let worktrees = GitCommand::new()
+            .current_dir(&worktree_root)
+            .worktree_list()?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stderr_lower = stderr.to_lowercase();
-            if stderr_lower.contains("not a git repository") {
-                return Err(WorkspaceError::NotInGitRepo);
-            }
-            return Err(WorkspaceError::GitCommandFailed(stderr.trim().to_string()));
-        }
+        let repo_root = worktrees
+            .first()
+            .map(|wt| wt.path.clone())
+            .unwrap_or_else(|| worktree_root.clone());
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let trimmed = stdout.trim();
-        if trimmed.is_empty() {
-            return Err(WorkspaceError::GitCommandFailed(
-                "Empty output from git rev-parse --show-toplevel".to_string(),
-            ));
-        }
-
-        let path = PathBuf::from(trimmed);
-        let mut repo_root = path.canonicalize().unwrap_or(path);
-        if let Some(parent) = repo_root.parent()
-            && parent.file_name() == Some(std::ffi::OsStr::new(".workspaces"))
-            && let Some(grandparent) = parent.parent()
-            && grandparent.join(".git").exists()
-        {
-            repo_root = grandparent.to_path_buf();
-        }
-        Ok(Self { repo_root })
+        Ok(Self {
+            repo_root,
+            worktree_root,
+        })
     }
 
     /// Returns the repository root path.
@@ -64,52 +42,30 @@ impl Git {
         &self.repo_root
     }
 
+    /// Returns the active worktree root path.
+    #[must_use]
+    pub fn worktree_root(&self) -> &Path {
+        &self.worktree_root
+    }
+
     /// Checks if a Git worktree for `workspace_name` is currently registered.
     pub fn is_workspace_registered(&self, workspace_name: &str) -> Result<bool, WorkspaceError> {
-        // Prune stale worktrees first so missing directories are not reported as registered
-        drop(
-            std::process::Command::new("git")
-                .args(["--no-pager", "worktree", "prune"])
-                .current_dir(&self.repo_root)
-                .output(),
-        );
-
-        let output = std::process::Command::new("git")
-            .args(["--no-pager", "worktree", "list", "--porcelain"])
+        GitCommand::new()
             .current_dir(&self.repo_root)
-            .output()?;
+            .worktree_prune()?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stderr_lower = stderr.to_lowercase();
-            if stderr_lower.contains("not a git repository") {
-                return Err(WorkspaceError::NotInGitRepo);
-            }
-            return Err(WorkspaceError::GitCommandFailed(stderr.trim().to_string()));
-        }
+        let worktrees = GitCommand::new()
+            .current_dir(&self.repo_root)
+            .worktree_list()?;
 
         let target_path = self.repo_root.join(".workspaces").join(workspace_name);
         let target_canonical = target_path.canonicalize().ok();
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            if let Some(rest) = line.strip_prefix("worktree ") {
-                let wt_path = PathBuf::from(rest.trim());
-                if wt_path == target_path {
-                    return Ok(true);
-                }
-                if let (Some(target_c), Ok(wt_c)) = (&target_canonical, wt_path.canonicalize())
-                    && wt_c == *target_c
-                {
-                    return Ok(true);
-                }
-                let suffix = format!(".workspaces/{workspace_name}");
-                if wt_path.ends_with(&suffix) {
-                    return Ok(true);
-                }
-            }
-        }
-        Ok(false)
+        Ok(worktrees.iter().any(|wt| {
+            wt.path == target_path
+                || (target_canonical.is_some() && wt.path.canonicalize().ok() == target_canonical)
+                || wt.path.ends_with(format!(".workspaces/{workspace_name}"))
+        }))
     }
 
     /// Adds a new Git worktree under `<repo_root>/<rel_workspace_path>`.
@@ -118,60 +74,26 @@ impl Git {
         rel_workspace_path: &Path,
         _workspace_name: &str,
     ) -> Result<(), WorkspaceError> {
-        drop(
-            std::process::Command::new("git")
-                .args(["--no-pager", "worktree", "prune"])
-                .current_dir(&self.repo_root)
-                .output(),
-        );
-
-        let output = std::process::Command::new("git")
-            .args(["--no-pager", "worktree", "add"])
-            .arg(rel_workspace_path)
+        GitCommand::new()
             .current_dir(&self.repo_root)
-            .output()?;
+            .worktree_prune()?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stderr_lower = stderr.to_lowercase();
-            if stderr_lower.contains("not a git repository") {
-                return Err(WorkspaceError::NotInGitRepo);
-            }
-            return Err(WorkspaceError::GitCommandFailed(stderr.trim().to_string()));
-        }
-
-        Ok(())
+        GitCommand::new()
+            .current_dir(&self.repo_root)
+            .worktree_add(rel_workspace_path)
     }
 
     /// Forgets/removes a Git worktree from the repository.
     pub fn forget_workspace(&self, workspace_name: &str) -> Result<(), WorkspaceError> {
         let ws_path = self.repo_root.join(".workspaces").join(workspace_name);
 
-        let output = std::process::Command::new("git")
-            .args(["--no-pager", "worktree", "remove", "--force"])
-            .arg(&ws_path)
+        GitCommand::new()
             .current_dir(&self.repo_root)
-            .output()?;
+            .worktree_remove(&ws_path, true)?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stderr_lower = stderr.to_lowercase();
-            if stderr_lower.contains("not a git repository") {
-                return Err(WorkspaceError::NotInGitRepo);
-            }
-            if !stderr_lower.contains("is not a working tree")
-                && !stderr_lower.contains("not a valid path")
-            {
-                return Err(WorkspaceError::GitCommandFailed(stderr.trim().to_string()));
-            }
-        }
-
-        drop(
-            std::process::Command::new("git")
-                .args(["--no-pager", "worktree", "prune"])
-                .current_dir(&self.repo_root)
-                .output(),
-        );
+        GitCommand::new()
+            .current_dir(&self.repo_root)
+            .worktree_prune()?;
 
         Ok(())
     }
@@ -184,54 +106,38 @@ impl Git {
 
     /// Lists all available workspaces in the Git repository.
     pub fn list_workspaces(&self) -> Result<Vec<String>, WorkspaceError> {
-        // Prune stale worktrees first so missing directories are not reported as registered
-        drop(
-            std::process::Command::new("git")
-                .args(["--no-pager", "worktree", "prune"])
-                .current_dir(&self.repo_root)
-                .output(),
-        );
-
-        let output = std::process::Command::new("git")
-            .args(["--no-pager", "worktree", "list", "--porcelain"])
+        GitCommand::new()
             .current_dir(&self.repo_root)
-            .output()?;
+            .worktree_prune()?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stderr_lower = stderr.to_lowercase();
-            if stderr_lower.contains("not a git repository") {
-                return Err(WorkspaceError::NotInGitRepo);
-            }
-            return Err(WorkspaceError::GitCommandFailed(stderr.trim().to_string()));
-        }
+        let worktrees = GitCommand::new()
+            .current_dir(&self.repo_root)
+            .worktree_list()?;
 
         let workspaces_dir = self.repo_root.join(".workspaces");
         let workspaces_dir_canonical = workspaces_dir.canonicalize().ok();
 
-        let mut workspaces = Vec::new();
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            if let Some(rest) = line.strip_prefix("worktree ") {
-                let wt_path = PathBuf::from(rest.trim());
-                let is_in_workspaces = if let Some(parent) = wt_path.parent() {
-                    parent == workspaces_dir
-                        || (workspaces_dir_canonical.is_some()
-                            && parent.canonicalize().ok() == workspaces_dir_canonical)
-                        || parent.ends_with(".workspaces")
-                } else {
-                    false
-                };
+        let workspaces = worktrees
+            .into_iter()
+            .filter(|wt| {
+                wt.path
+                    .parent()
+                    .map(|parent| {
+                        parent == workspaces_dir
+                            || (workspaces_dir_canonical.is_some()
+                                && parent.canonicalize().ok() == workspaces_dir_canonical)
+                            || parent.ends_with(".workspaces")
+                    })
+                    .unwrap_or_default()
+            })
+            .filter_map(|wt| {
+                let file_name = wt.path.file_name()?.to_str()?;
+                crate::workspace::validate_workspace_name(file_name).ok()?;
+                self.workspace_exists(&wt.path)
+                    .then(|| file_name.to_string())
+            })
+            .collect();
 
-                if is_in_workspaces
-                    && let Some(file_name) = wt_path.file_name().and_then(|n| n.to_str())
-                    && crate::workspace::validate_workspace_name(file_name).is_ok()
-                    && self.workspace_exists(&wt_path)
-                {
-                    workspaces.push(file_name.to_string());
-                }
-            }
-        }
         Ok(workspaces)
     }
 }

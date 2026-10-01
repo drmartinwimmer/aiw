@@ -95,6 +95,15 @@ impl Vcs {
         }
     }
 
+    /// Returns the active worktree or workspace root path.
+    #[must_use]
+    pub fn worktree_root(&self) -> &Path {
+        match &self.kind {
+            VcsKind::Jj(jj) => jj.workspace_root(),
+            VcsKind::Git(git) => git.worktree_root(),
+        }
+    }
+
     /// Checks if a workspace is registered.
     pub fn is_workspace_registered(&self, name: &str) -> Result<bool, WorkspaceError> {
         match &self.kind {
