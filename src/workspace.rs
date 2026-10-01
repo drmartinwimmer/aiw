@@ -20,7 +20,7 @@ pub enum WorkspaceError {
     Io(#[from] std::io::Error),
 }
 
-fn validate_workspace_name(workspace_name: &str) -> Result<(), WorkspaceError> {
+pub(crate) fn validate_workspace_name(workspace_name: &str) -> Result<(), WorkspaceError> {
     if workspace_name.is_empty()
         || workspace_name == "."
         || workspace_name == ".."
@@ -57,6 +57,29 @@ impl Workspace {
         Self::from_vcs(vcs, name)
     }
 
+    /// Lists all available workspaces in the repository enclosing `dir`.
+    pub fn list_from_dir(dir: &Path) -> Result<Vec<Self>, WorkspaceError> {
+        let vcs = Vcs::from_path(dir)?;
+        Self::list_from_vcs(vcs)
+    }
+
+    /// Lists all available workspaces for a given repository root.
+    pub fn list(repo_root: &Path) -> Result<Vec<Self>, WorkspaceError> {
+        let vcs = Vcs::from_path(repo_root)?;
+        Self::list_from_vcs(vcs)
+    }
+
+    fn list_from_vcs(vcs: Vcs) -> Result<Vec<Self>, WorkspaceError> {
+        let mut names = vcs.list_workspaces()?;
+        names.sort();
+        names.dedup();
+        let mut workspaces = Vec::with_capacity(names.len());
+        for name in names {
+            workspaces.push(Self::from_vcs(vcs.clone(), &name)?);
+        }
+        Ok(workspaces)
+    }
+
     fn from_vcs(vcs: Vcs, name: &str) -> Result<Self, WorkspaceError> {
         validate_workspace_name(name)?;
         let path = vcs.repo_root().join(".workspaces").join(name);
@@ -83,6 +106,12 @@ impl Workspace {
     #[must_use]
     pub fn repo_root(&self) -> &Path {
         self.vcs.repo_root()
+    }
+
+    /// Returns the current worktree or workspace root path of the enclosing repository.
+    #[must_use]
+    pub fn worktree_root(&self) -> &Path {
+        self.vcs.worktree_root()
     }
 
     /// Returns `true` if the workspace currently exists on disk and contains appropriate VCS metadata.
@@ -500,5 +529,94 @@ mod tests {
         let second_ensure = ws.ensure().expect("second ensure");
         expect_that!(second_ensure, is_true());
         expect_that!(ws.path().exists(), is_true());
+    }
+
+    #[googletest::test]
+    fn workspace_list_in_jj_repo_returns_available_workspaces() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = dir.path();
+        init_test_jj_repo(repo_root);
+
+        let initial = Workspace::list(repo_root).expect("Workspace::list initial");
+        expect_that!(initial, is_empty());
+
+        let ws1 = Workspace::new(repo_root, "ws-alpha").expect("ws-alpha");
+        let ws2 = Workspace::new(repo_root, "ws-beta").expect("ws-beta");
+        ws1.ensure().expect("ensure ws1");
+        ws2.ensure().expect("ensure ws2");
+
+        let listed = Workspace::list(repo_root).expect("Workspace::list after ensure");
+        let names: Vec<String> = listed.into_iter().map(|w| w.name().to_string()).collect();
+        expect_that!(names, elements_are![eq("ws-alpha"), eq("ws-beta")]);
+
+        // list_from_dir called from inside a workspace path works identically
+        let listed_from_sub =
+            Workspace::list_from_dir(ws1.path()).expect("list_from_dir from workspace");
+        let names_from_sub: Vec<String> = listed_from_sub
+            .into_iter()
+            .map(|w| w.name().to_string())
+            .collect();
+        expect_that!(names_from_sub, elements_are![eq("ws-alpha"), eq("ws-beta")]);
+
+        // After forgetting ws1
+        ws1.forget().expect("forget ws1");
+        let listed_after_forget = Workspace::list(repo_root).expect("Workspace::list after forget");
+        let names_after_forget: Vec<String> = listed_after_forget
+            .into_iter()
+            .map(|w| w.name().to_string())
+            .collect();
+        expect_that!(names_after_forget, elements_are![eq("ws-beta")]);
+    }
+
+    #[googletest::test]
+    fn workspace_list_in_git_repo_returns_available_workspaces() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo_root = dir.path();
+        init_test_git_repo(repo_root);
+
+        let initial = Workspace::list(repo_root).expect("Workspace::list initial");
+        expect_that!(initial, is_empty());
+
+        let ws1 = Workspace::new(repo_root, "git-alpha").expect("git-alpha");
+        let ws2 = Workspace::new(repo_root, "git-beta").expect("git-beta");
+        ws1.ensure().expect("ensure ws1");
+        ws2.ensure().expect("ensure ws2");
+
+        let listed = Workspace::list(repo_root).expect("Workspace::list after ensure");
+        let names: Vec<String> = listed.into_iter().map(|w| w.name().to_string()).collect();
+        expect_that!(names, elements_are![eq("git-alpha"), eq("git-beta")]);
+
+        // list_from_dir called from inside a workspace path works identically
+        let listed_from_sub =
+            Workspace::list_from_dir(ws1.path()).expect("list_from_dir from workspace");
+        let names_from_sub: Vec<String> = listed_from_sub
+            .into_iter()
+            .map(|w| w.name().to_string())
+            .collect();
+        expect_that!(
+            names_from_sub,
+            elements_are![eq("git-alpha"), eq("git-beta")]
+        );
+
+        // After forgetting ws1
+        ws1.forget().expect("forget ws1");
+        let listed_after_forget = Workspace::list(repo_root).expect("Workspace::list after forget");
+        let names_after_forget: Vec<String> = listed_after_forget
+            .into_iter()
+            .map(|w| w.name().to_string())
+            .collect();
+        expect_that!(names_after_forget, elements_are![eq("git-beta")]);
+    }
+
+    #[googletest::test]
+    fn workspace_list_outside_repo_returns_not_in_repo_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let non_repo = dir.path();
+
+        let res = Workspace::list(non_repo);
+        expect_that!(
+            res,
+            matches_pattern!(Err(matches_pattern!(WorkspaceError::NotInRepo)))
+        );
     }
 }

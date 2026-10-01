@@ -137,7 +137,21 @@ aiw forget <workspace-name>
 
 This cleans up the workspace registration (`jj workspace forget` for Jujutsu or `git worktree remove` for Git) and removes `.workspaces/<workspace-name>` from disk.
 
-### 5. Initialize Configuration
+### 5. List Available Workspaces
+
+To list all currently provisioned workspaces in the repository:
+
+```bash
+aiw list
+```
+
+This displays all active workspaces located under `.workspaces/` (one per line). You can also use the shorthand alias:
+
+```bash
+aiw ls
+```
+
+### 6. Initialize Configuration
 
 To initialize starter configuration files:
 

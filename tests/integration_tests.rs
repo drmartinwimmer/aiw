@@ -448,7 +448,8 @@ fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
     .expect("write .envrc");
 
     // Allow direnv in workspace for direct SandboxBuilder execution
-    aiw::direnv::Direnv::allow_dir(&ws_path);
+    let direnv = aiw::direnv::Direnv::new(repo_root);
+    direnv.allow_workspace(&ws_path);
 
     let sh_bin = if Path::new("/bin/sh").exists() {
         "/bin/sh"
@@ -1103,4 +1104,130 @@ fn aiw_config_init_defaults_to_project_and_user_subcommand_inits_user() {
     expect_that!(stdout3.as_ref(), eq(""));
     expect_that!(stderr3.as_ref(), eq(""));
     expect_that!(project_config.exists(), is_true());
+}
+
+#[googletest::test]
+fn list_subcommand_in_jj_repo_lists_all_workspaces() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let repo_root = temp_dir.path();
+    init_test_jj_repo(repo_root);
+    write_test_fence_json(repo_root);
+
+    // Initial list is empty
+    let out_empty = run_aiw(repo_root, &["list"]);
+    expect_that!(out_empty.status.success(), is_true());
+    expect_that!(String::from_utf8_lossy(&out_empty.stdout).as_ref(), eq(""));
+
+    // Create two workspaces
+    let out1 = run_aiw(repo_root, &["agy", "ws-first", "--dry-run"]);
+    expect_that!(out1.status.success(), is_true());
+    let out2 = run_aiw(repo_root, &["agy", "ws-second", "--dry-run"]);
+    expect_that!(out2.status.success(), is_true());
+
+    // list outputs sorted workspaces
+    let out_list = run_aiw(repo_root, &["list"]);
+    expect_that!(out_list.status.success(), is_true());
+    expect_that!(
+        String::from_utf8_lossy(&out_list.stdout).as_ref(),
+        eq("ws-first\nws-second\n")
+    );
+
+    // ls alias outputs identical content
+    let out_ls = run_aiw(repo_root, &["ls"]);
+    expect_that!(out_ls.status.success(), is_true());
+    expect_that!(
+        String::from_utf8_lossy(&out_ls.stdout).as_ref(),
+        eq("ws-first\nws-second\n")
+    );
+
+    // Running list from inside a workspace also lists all workspaces
+    let ws_path = repo_root.join(".workspaces").join("ws-first");
+    let out_from_ws = run_aiw(&ws_path, &["list"]);
+    expect_that!(out_from_ws.status.success(), is_true());
+    expect_that!(
+        String::from_utf8_lossy(&out_from_ws.stdout).as_ref(),
+        eq("ws-first\nws-second\n")
+    );
+
+    // Forget first workspace
+    let out_forget = run_aiw(repo_root, &["forget", "ws-first"]);
+    expect_that!(out_forget.status.success(), is_true());
+
+    // Only ws-second remains
+    let out_after_forget = run_aiw(repo_root, &["list"]);
+    expect_that!(out_after_forget.status.success(), is_true());
+    expect_that!(
+        String::from_utf8_lossy(&out_after_forget.stdout).as_ref(),
+        eq("ws-second\n")
+    );
+}
+
+#[googletest::test]
+fn list_subcommand_in_git_repo_lists_all_workspaces() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let repo_root = temp_dir.path();
+    init_test_git_repo(repo_root);
+    write_test_fence_json(repo_root);
+
+    // Initial list is empty
+    let out_empty = run_aiw(repo_root, &["list"]);
+    expect_that!(out_empty.status.success(), is_true());
+    expect_that!(String::from_utf8_lossy(&out_empty.stdout).as_ref(), eq(""));
+
+    // Create two workspaces
+    let out1 = run_aiw(repo_root, &["agy", "git-one", "--dry-run"]);
+    expect_that!(out1.status.success(), is_true());
+    let out2 = run_aiw(repo_root, &["agy", "git-two", "--dry-run"]);
+    expect_that!(out2.status.success(), is_true());
+
+    // list outputs sorted workspaces
+    let out_list = run_aiw(repo_root, &["list"]);
+    expect_that!(out_list.status.success(), is_true());
+    expect_that!(
+        String::from_utf8_lossy(&out_list.stdout).as_ref(),
+        eq("git-one\ngit-two\n")
+    );
+
+    // ls alias works
+    let out_ls = run_aiw(repo_root, &["ls"]);
+    expect_that!(out_ls.status.success(), is_true());
+    expect_that!(
+        String::from_utf8_lossy(&out_ls.stdout).as_ref(),
+        eq("git-one\ngit-two\n")
+    );
+
+    // Running list from inside a worktree also lists all workspaces
+    let ws_path = repo_root.join(".workspaces").join("git-one");
+    let out_from_ws = run_aiw(&ws_path, &["list"]);
+    expect_that!(out_from_ws.status.success(), is_true());
+    expect_that!(
+        String::from_utf8_lossy(&out_from_ws.stdout).as_ref(),
+        eq("git-one\ngit-two\n")
+    );
+
+    // Forget first workspace
+    let out_forget = run_aiw(repo_root, &["forget", "git-one"]);
+    expect_that!(out_forget.status.success(), is_true());
+
+    // Only git-two remains
+    let out_after_forget = run_aiw(repo_root, &["list"]);
+    expect_that!(out_after_forget.status.success(), is_true());
+    expect_that!(
+        String::from_utf8_lossy(&out_after_forget.stdout).as_ref(),
+        eq("git-two\n")
+    );
+}
+
+#[googletest::test]
+fn list_subcommand_outside_repo_fails() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let non_repo = temp_dir.path();
+
+    let output = run_aiw(non_repo, &["list"]);
+    expect_that!(output.status.success(), is_false());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    expect_that!(
+        stderr.as_ref(),
+        contains_substring("Error: Not inside a Jujutsu or Git repository")
+    );
 }
