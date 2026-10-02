@@ -33,6 +33,8 @@ enum Commands {
     /// List all available workspaces
     #[command(alias = "ls")]
     List(ListCommand),
+    /// Generate shell completion script
+    Completion(CompletionCommand),
 }
 
 impl Commands {
@@ -42,6 +44,7 @@ impl Commands {
             Commands::Forget(cmd) => cmd.run(),
             Commands::Config(cmd) => cmd.run(),
             Commands::List(cmd) => cmd.run(),
+            Commands::Completion(cmd) => cmd.run(),
         }
     }
 }
@@ -61,8 +64,71 @@ impl ListCommand {
 }
 
 #[derive(clap::Args, Debug, PartialEq, Eq)]
+struct CompletionCommand {
+    /// Shell to generate completions for
+    shell: ShellChoice,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShellChoice {
+    /// Bourne Again SHell (bash)
+    Bash,
+    /// Elvish shell
+    Elvish,
+    /// Friendly Interactive SHell (fish)
+    Fish,
+    /// PowerShell
+    Powershell,
+    /// Z SHell (zsh)
+    Zsh,
+}
+
+impl CompletionCommand {
+    fn run(&self) -> Result<(), AppError> {
+        use clap_complete::env::{Bash, Elvish, EnvCompleter, Fish, Powershell, Zsh};
+        let mut stdout = std::io::stdout();
+        match self.shell {
+            ShellChoice::Bash => {
+                Bash.write_registration("COMPLETE", "aiw", "aiw", "aiw", &mut stdout)?
+            }
+            ShellChoice::Elvish => {
+                Elvish.write_registration("COMPLETE", "aiw", "aiw", "aiw", &mut stdout)?
+            }
+            ShellChoice::Fish => {
+                Fish.write_registration("COMPLETE", "aiw", "aiw", "aiw", &mut stdout)?
+            }
+            ShellChoice::Powershell => {
+                Powershell.write_registration("COMPLETE", "aiw", "aiw", "aiw", &mut stdout)?
+            }
+            ShellChoice::Zsh => {
+                Zsh.write_registration("COMPLETE", "aiw", "aiw", "aiw", &mut stdout)?
+            }
+        }
+        Ok(())
+    }
+}
+
+fn complete_workspaces(
+    current: &std::ffi::OsStr,
+) -> Vec<clap_complete::engine::CompletionCandidate> {
+    let current_str = current.to_str().unwrap_or("");
+    let Ok(current_dir) = std::env::current_dir() else {
+        return Vec::new();
+    };
+    let Ok(workspaces) = Workspace::list_from_dir(&current_dir) else {
+        return Vec::new();
+    };
+    workspaces
+        .into_iter()
+        .filter(|ws| ws.name().starts_with(current_str))
+        .map(|ws| clap_complete::engine::CompletionCandidate::new(ws.name()))
+        .collect()
+}
+
+#[derive(clap::Args, Debug, PartialEq, Eq)]
 struct ForgetCommand {
     /// Workspace name under .workspaces/<workspace-name>
+    #[arg(add = clap_complete::engine::ArgValueCompleter::new(complete_workspaces))]
     workspace_name: String,
 }
 
@@ -78,6 +144,7 @@ impl ForgetCommand {
 #[derive(clap::Args, Debug, PartialEq, Eq)]
 struct AgyCommand {
     /// Workspace name under .workspaces/<workspace-name>
+    #[arg(add = clap_complete::engine::ArgValueCompleter::new(complete_workspaces))]
     workspace_name: String,
 
     /// Print generated Fence command without executing
@@ -422,5 +489,35 @@ mod tests {
     fn parse_list_subcommand_alias_ls_succeeds() {
         let cli = Cli::try_parse_from(["aiw", "ls"]).expect("parse ls");
         expect_that!(&cli.command, eq(&Commands::List(ListCommand {})));
+    }
+
+    #[googletest::test]
+    fn parse_completion_subcommand_succeeds_for_all_shells() {
+        let shells = [
+            ("bash", ShellChoice::Bash),
+            ("elvish", ShellChoice::Elvish),
+            ("fish", ShellChoice::Fish),
+            ("powershell", ShellChoice::Powershell),
+            ("zsh", ShellChoice::Zsh),
+        ];
+        for (name, expected) in shells {
+            let cli = Cli::try_parse_from(["aiw", "completion", name]).expect("parse completion");
+            expect_that!(
+                &cli.command,
+                eq(&Commands::Completion(CompletionCommand { shell: expected }))
+            );
+        }
+    }
+
+    #[googletest::test]
+    fn parse_completion_without_shell_fails() {
+        let cli = Cli::try_parse_from(["aiw", "completion"]);
+        expect_that!(cli.is_err(), is_true());
+    }
+
+    #[googletest::test]
+    fn parse_completion_invalid_shell_fails() {
+        let cli = Cli::try_parse_from(["aiw", "completion", "invalid_shell"]);
+        expect_that!(cli.is_err(), is_true());
     }
 }

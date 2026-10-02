@@ -49,6 +49,11 @@
           '';
           postInstall = ''
             install -Dm644 templates/fence.jsonc $out/share/aiw/fence.jsonc
+
+            mkdir -p $out/share/bash-completion/completions $out/share/zsh/site-functions $out/share/fish/vendor_completions.d
+            $out/bin/aiw completion bash > $out/share/bash-completion/completions/aiw
+            $out/bin/aiw completion zsh > $out/share/zsh/site-functions/_aiw
+            $out/bin/aiw completion fish > $out/share/fish/vendor_completions.d/aiw.fish
           '';
         };
       in
