@@ -1231,3 +1231,119 @@ fn list_subcommand_outside_repo_fails() {
         contains_substring("Error: Not inside a Jujutsu or Git repository")
     );
 }
+
+fn run_aiw_with_env(cwd: &Path, envs: &[(&str, &str)], args: &[&str]) -> Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_aiw"));
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
+    cmd.args(args).current_dir(cwd).output().expect("run aiw")
+}
+
+#[googletest::test]
+fn completion_subcommand_outputs_bash_script() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let output = run_aiw(temp_dir.path(), &["completion", "bash"]);
+    expect_that!(output.status.success(), is_true());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    expect_that!(stdout.as_ref(), contains_substring("_clap_complete_aiw"));
+    expect_that!(stdout.as_ref(), contains_substring("complete -o nospace"));
+}
+
+#[googletest::test]
+fn completion_subcommand_outputs_zsh_script() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let output = run_aiw(temp_dir.path(), &["completion", "zsh"]);
+    expect_that!(output.status.success(), is_true());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    expect_that!(
+        stdout.as_ref(),
+        contains_substring("_clap_dynamic_completer_aiw")
+    );
+    expect_that!(stdout.as_ref(), contains_substring("compdef"));
+}
+
+#[googletest::test]
+fn completion_subcommand_outputs_fish_script() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let output = run_aiw(temp_dir.path(), &["completion", "fish"]);
+    expect_that!(output.status.success(), is_true());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    expect_that!(stdout.as_ref(), contains_substring("complete"));
+    expect_that!(stdout.as_ref(), contains_substring("--command aiw"));
+}
+
+#[googletest::test]
+fn dynamic_completion_for_forget_in_jj_repo_completes_workspaces() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let repo_root = temp_dir.path();
+    init_test_jj_repo(repo_root);
+    write_test_fence_json(repo_root);
+
+    // Create workspaces
+    let out1 = run_aiw(repo_root, &["agy", "ws-alpha", "--dry-run"]);
+    expect_that!(out1.status.success(), is_true());
+    let out2 = run_aiw(repo_root, &["agy", "ws-beta", "--dry-run"]);
+    expect_that!(out2.status.success(), is_true());
+
+    // Complete aiw forget ""
+    let comp_output = run_aiw_with_env(
+        repo_root,
+        &[("COMPLETE", "bash"), ("_CLAP_COMPLETE_INDEX", "2")],
+        &["--", "aiw", "forget", ""],
+    );
+    expect_that!(comp_output.status.success(), is_true());
+    let stdout = String::from_utf8_lossy(&comp_output.stdout);
+    expect_that!(stdout.as_ref(), contains_substring("ws-alpha\n"));
+    expect_that!(stdout.as_ref(), contains_substring("ws-beta\n"));
+
+    // Prefix filtering: aiw forget "ws-a"
+    let prefix_output = run_aiw_with_env(
+        repo_root,
+        &[("COMPLETE", "bash"), ("_CLAP_COMPLETE_INDEX", "2")],
+        &["--", "aiw", "forget", "ws-a"],
+    );
+    expect_that!(prefix_output.status.success(), is_true());
+    let prefix_stdout = String::from_utf8_lossy(&prefix_output.stdout);
+    expect_that!(prefix_stdout.as_ref(), contains_substring("ws-alpha"));
+    expect_that!(prefix_stdout.as_ref(), not(contains_substring("ws-beta")));
+}
+
+#[googletest::test]
+fn dynamic_completion_for_agy_in_git_repo_completes_workspaces() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let repo_root = temp_dir.path();
+    init_test_git_repo(repo_root);
+    write_test_fence_json(repo_root);
+
+    // Create workspaces
+    let out1 = run_aiw(repo_root, &["agy", "git-feat1", "--dry-run"]);
+    expect_that!(out1.status.success(), is_true());
+    let out2 = run_aiw(repo_root, &["agy", "git-feat2", "--dry-run"]);
+    expect_that!(out2.status.success(), is_true());
+
+    // Complete aiw agy ""
+    let comp_output = run_aiw_with_env(
+        repo_root,
+        &[("COMPLETE", "bash"), ("_CLAP_COMPLETE_INDEX", "2")],
+        &["--", "aiw", "agy", ""],
+    );
+    expect_that!(comp_output.status.success(), is_true());
+    let stdout = String::from_utf8_lossy(&comp_output.stdout);
+    expect_that!(stdout.as_ref(), contains_substring("git-feat1\n"));
+    expect_that!(stdout.as_ref(), contains_substring("git-feat2\n"));
+    expect_that!(stdout.as_ref(), contains_substring("--dry-run\n"));
+}
+
+#[googletest::test]
+fn dynamic_completion_outside_repo_succeeds_gracefully() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let non_repo = temp_dir.path();
+
+    let comp_output = run_aiw_with_env(
+        non_repo,
+        &[("COMPLETE", "bash"), ("_CLAP_COMPLETE_INDEX", "2")],
+        &["--", "aiw", "forget", ""],
+    );
+    expect_that!(comp_output.status.success(), is_true());
+}

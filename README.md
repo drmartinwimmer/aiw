@@ -172,6 +172,29 @@ This command:
 
 Pass `--force` (or `-f`) to overwrite existing files.
 
+### 7. Shell Completion
+
+`aiw` supports shell completion with dynamic workspace name resolution for `aiw forget` and `aiw agy`, as well as full completion for subcommands and flags.
+
+Generate and source completion scripts for your shell:
+
+```bash
+# Bash
+source <(aiw completion bash)
+# Or permanently:
+aiw completion bash > ~/.local/share/bash-completion/completions/aiw
+
+# Zsh
+source <(aiw completion zsh)
+# Or permanently:
+aiw completion zsh > ~/.zfunc/_aiw
+
+# Fish
+aiw completion fish > ~/.config/fish/completions/aiw.fish
+```
+
+When installed via Nix, shell completions are automatically packaged in `$out/share/bash-completion/completions/aiw`, `$out/share/zsh/site-functions/_aiw`, and `$out/share/fish/vendor_completions.d/aiw.fish`.
+
 ---
 
 ## Configuration
