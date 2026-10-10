@@ -104,8 +104,8 @@ mod tests {
         expect_that!(fence_file.exists(), is_true());
 
         let content = std::fs::read_to_string(&fence_file).expect("read fence.jsonc");
-        expect_that!(content.as_str(), contains_substring("fence.schema.json"));
-        expect_that!(content.as_str(), contains_substring("\"extends\":"));
+        expect_that!(&content, contains_substring("fence.schema.json"));
+        expect_that!(&content, contains_substring("\"extends\":"));
 
         // Second call without force returns AlreadyExists error
         let second = ConfigInitializer::init_project_config(project_dir, false);
