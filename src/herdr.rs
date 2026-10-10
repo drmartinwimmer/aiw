@@ -423,6 +423,7 @@ mod tests {
     use super::*;
     use googletest::prelude::*;
     use std::sync::Mutex;
+    use tempfile::NamedTempFile;
 
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
@@ -564,7 +565,7 @@ exit 1
 
     #[googletest::test]
     fn report_agent_and_inform_agent_sends_expected_cli_arguments() {
-        let log_file = tempfile::NamedTempFile::new().expect("temp file");
+        let log_file = NamedTempFile::new().expect("temp file");
         let log_path = log_file.path().to_string_lossy().to_string();
 
         let script = format!(
@@ -590,7 +591,7 @@ exit 0
 
     #[googletest::test]
     fn execute_in_pane_sends_command_via_pane_run() {
-        let log_file = tempfile::NamedTempFile::new().expect("temp file");
+        let log_file = NamedTempFile::new().expect("temp file");
         let log_path = log_file.path().to_string_lossy().to_string();
 
         let script = format!(
@@ -616,7 +617,7 @@ exit 0
 
     #[googletest::test]
     fn run_command_decides_to_create_tab_when_not_in_workspace_tab() {
-        let log_file = tempfile::NamedTempFile::new().expect("temp file");
+        let log_file = NamedTempFile::new().expect("temp file");
         let log_path = log_file.path().to_string_lossy().to_string();
 
         let script = format!(
@@ -662,7 +663,7 @@ exit 0
 
     #[googletest::test]
     fn run_command_decides_to_run_in_place_when_already_in_workspace_tab() {
-        let log_file = tempfile::NamedTempFile::new().expect("temp file");
+        let log_file = NamedTempFile::new().expect("temp file");
         let log_path = log_file.path().to_string_lossy().to_string();
 
         let script = format!(

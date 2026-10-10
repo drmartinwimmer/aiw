@@ -1,11 +1,13 @@
+use aiw::Cli;
 use clap::CommandFactory as _;
+use clap_complete::env::CompleteEnv;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    clap_complete::env::CompleteEnv::with_factory(aiw::Cli::command)
+    CompleteEnv::with_factory(Cli::command)
         .completer("aiw")
         .complete();
-    match aiw::Cli::run() {
+    match Cli::run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("Error: {err}");

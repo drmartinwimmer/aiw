@@ -1,6 +1,6 @@
 use super::normalize_search_dir;
 use crate::tools::GitCommand;
-use crate::workspace::WorkspaceError;
+use crate::workspace::{WorkspaceError, validate_workspace_name};
 use std::path::{Path, PathBuf};
 
 /// Encapsulates Git repository operations.
@@ -132,7 +132,7 @@ impl Git {
             })
             .filter_map(|wt| {
                 let file_name = wt.path.file_name()?.to_str()?;
-                crate::workspace::validate_workspace_name(file_name).ok()?;
+                validate_workspace_name(file_name).ok()?;
                 self.workspace_exists(&wt.path)
                     .then(|| file_name.to_string())
             })

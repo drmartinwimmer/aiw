@@ -1,6 +1,6 @@
 use super::normalize_search_dir;
 use crate::tools::JjCommand;
-use crate::workspace::WorkspaceError;
+use crate::workspace::{WorkspaceError, validate_workspace_name};
 use std::path::{Path, PathBuf};
 
 /// Encapsulates Jujutsu repository operations.
@@ -104,7 +104,7 @@ impl Jj {
                     .unwrap_or_default()
             })
             .filter_map(|entry| {
-                crate::workspace::validate_workspace_name(&entry.name).ok()?;
+                validate_workspace_name(&entry.name).ok()?;
                 self.workspace_exists(&entry.root).then_some(entry.name)
             })
             .collect();
