@@ -101,8 +101,17 @@ pub struct Herdr {
 impl Herdr {
     /// Returns `true` if `aiw` is currently running inside a Herdr-managed pane (`HERDR_ENV=1`).
     #[must_use]
-    pub(crate) fn is_inside_herdr() -> bool {
-        std::env::var("HERDR_ENV").is_ok_and(|val| val == "1")
+    pub fn is_inside_herdr() -> bool {
+        Self::is_inside_herdr_with(|k| std::env::var(k).ok())
+    }
+
+    /// Checks if running inside Herdr using a custom environment variable lookup function.
+    #[must_use]
+    pub(crate) fn is_inside_herdr_with<F>(var_getter: F) -> bool
+    where
+        F: Fn(&str) -> Option<String>,
+    {
+        var_getter("HERDR_ENV").is_some_and(|val| val == "1")
     }
 
     /// Constructs a `Herdr` instance using configuration and identifiers from the environment.
@@ -112,17 +121,29 @@ impl Herdr {
         if !Self::is_inside_herdr() {
             return None;
         }
+        Self::from_env_with(|k| std::env::var(k).ok())
+    }
 
-        let binary = std::env::var_os("HERDR_BIN_PATH")
+    /// Constructs a `Herdr` instance using a custom environment variable lookup function.
+    #[must_use]
+    pub(crate) fn from_env_with<F>(var_getter: F) -> Option<Self>
+    where
+        F: Fn(&str) -> Option<String>,
+    {
+        if !Self::is_inside_herdr_with(&var_getter) {
+            return None;
+        }
+
+        let binary = var_getter("HERDR_BIN_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("herdr"));
 
         Some(Self {
             binary,
-            workspace_id: std::env::var("HERDR_WORKSPACE_ID").ok(),
-            tab_id: std::env::var("HERDR_TAB_ID").ok(),
-            pane_id: std::env::var("HERDR_PANE_ID").ok(),
-            socket_path: std::env::var_os("HERDR_SOCKET_PATH").map(PathBuf::from),
+            workspace_id: var_getter("HERDR_WORKSPACE_ID"),
+            tab_id: var_getter("HERDR_TAB_ID"),
+            pane_id: var_getter("HERDR_PANE_ID"),
+            socket_path: var_getter("HERDR_SOCKET_PATH").map(PathBuf::from),
         })
     }
 
@@ -422,25 +443,7 @@ impl Herdr {
 mod tests {
     use super::*;
     use googletest::prelude::*;
-    use std::sync::Mutex;
     use tempfile::NamedTempFile;
-
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
-
-    fn set_env(key: &str, val: &str) {
-        // SAFETY: Test functions serialize environment modifications via ENV_MUTEX.
-        unsafe {
-            std::env::set_var(key, val);
-        }
-    }
-
-    fn remove_env(key: &str) {
-        // SAFETY: Test functions serialize environment modifications via ENV_MUTEX.
-        unsafe {
-            std::env::remove_var(key);
-        }
-    }
-
     fn create_mock_script(script_content: &str) -> (tempfile::TempDir, PathBuf) {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let script_path = temp_dir.path().join("mock_herdr.sh");
@@ -458,50 +461,66 @@ mod tests {
 
     #[googletest::test]
     fn is_inside_herdr_detects_herdr_env_variable() {
-        let _guard = ENV_MUTEX.lock().expect("lock env mutex");
-
-        set_env("HERDR_ENV", "1");
-        expect_that!(Herdr::is_inside_herdr(), is_true());
-
-        set_env("HERDR_ENV", "0");
-        expect_that!(Herdr::is_inside_herdr(), is_false());
-
-        remove_env("HERDR_ENV");
-        expect_that!(Herdr::is_inside_herdr(), is_false());
+        expect_that!(
+            Herdr::is_inside_herdr_with(|k| if k == "HERDR_ENV" {
+                Some("1".to_string())
+            } else {
+                None
+            }),
+            is_true()
+        );
+        expect_that!(
+            Herdr::is_inside_herdr_with(|k| if k == "HERDR_ENV" {
+                Some("0".to_string())
+            } else {
+                None
+            }),
+            is_false()
+        );
+        expect_that!(Herdr::is_inside_herdr_with(|_| None), is_false());
     }
 
     #[googletest::test]
     fn from_env_returns_some_when_herdr_env_is_1_and_none_otherwise() {
-        let _guard = ENV_MUTEX.lock().expect("lock env mutex");
+        let vars = [
+            ("HERDR_ENV", "1"),
+            ("HERDR_PANE_ID", "w1:p1"),
+            ("HERDR_TAB_ID", "w1:t1"),
+            ("HERDR_WORKSPACE_ID", "w1"),
+        ];
+        let get_var = |k: &str| {
+            vars.iter()
+                .find(|(key, _)| *key == k)
+                .map(|(_, v)| (*v).to_string())
+        };
 
-        set_env("HERDR_ENV", "1");
-        set_env("HERDR_PANE_ID", "w1:p1");
-        set_env("HERDR_TAB_ID", "w1:t1");
-        set_env("HERDR_WORKSPACE_ID", "w1");
-
-        let detected = Herdr::from_env();
+        let detected = Herdr::from_env_with(get_var);
         expect_that!(detected, some(anything()));
         let herdr = detected.expect("detected");
         expect_that!(herdr.pane_id(), some(eq("w1:p1")));
         expect_that!(herdr.tab_id(), some(eq("w1:t1")));
         expect_that!(herdr.workspace_id(), some(eq("w1")));
 
-        remove_env("HERDR_ENV");
-        expect_that!(Herdr::from_env(), none());
+        expect_that!(Herdr::from_env_with(|_| None), none());
     }
 
     #[googletest::test]
     fn from_env_populates_all_environment_context() {
-        let _guard = ENV_MUTEX.lock().expect("lock env mutex");
+        let vars = [
+            ("HERDR_ENV", "1"),
+            ("HERDR_BIN_PATH", "/custom/bin/herdr"),
+            ("HERDR_WORKSPACE_ID", "ws-42"),
+            ("HERDR_TAB_ID", "ws-42:t9"),
+            ("HERDR_PANE_ID", "ws-42:p9"),
+            ("HERDR_SOCKET_PATH", "/custom/socket.sock"),
+        ];
+        let get_var = |k: &str| {
+            vars.iter()
+                .find(|(key, _)| *key == k)
+                .map(|(_, v)| (*v).to_string())
+        };
 
-        set_env("HERDR_ENV", "1");
-        set_env("HERDR_BIN_PATH", "/custom/bin/herdr");
-        set_env("HERDR_WORKSPACE_ID", "ws-42");
-        set_env("HERDR_TAB_ID", "ws-42:t9");
-        set_env("HERDR_PANE_ID", "ws-42:p9");
-        set_env("HERDR_SOCKET_PATH", "/custom/socket.sock");
-
-        let detected = Herdr::from_env();
+        let detected = Herdr::from_env_with(get_var);
         expect_that!(detected, some(anything()));
         let herdr = detected.expect("from_env");
         expect_that!(herdr.binary(), eq(Path::new("/custom/bin/herdr")));
@@ -512,13 +531,6 @@ mod tests {
             herdr.socket_path(),
             some(eq(Path::new("/custom/socket.sock")))
         );
-
-        remove_env("HERDR_ENV");
-        remove_env("HERDR_BIN_PATH");
-        remove_env("HERDR_WORKSPACE_ID");
-        remove_env("HERDR_TAB_ID");
-        remove_env("HERDR_PANE_ID");
-        remove_env("HERDR_SOCKET_PATH");
     }
 
     #[googletest::test]
