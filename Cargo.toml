@@ -86,7 +86,6 @@ allow_attributes_without_reason = "warn"
 [package.metadata.purist.lints]
 free_functions = "allow"
 googletest_conventions = "allow"
-max_file_lines = "allow"
 no_env_access_outside_config = "allow"
 no_println_in_libraries = "allow"
 test_matcher_borrow_simplification = "allow"
