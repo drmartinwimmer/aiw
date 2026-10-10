@@ -39,7 +39,7 @@ impl JjCommand {
         cmd
     }
 
-    fn run(&self, args: &[&str]) -> Result<std::process::Output, WorkspaceError> {
+    fn exec(&self, args: &[&str]) -> Result<std::process::Output, WorkspaceError> {
         self.build_cmd(args).output().map_err(|err| {
             if err.kind() == std::io::ErrorKind::NotFound {
                 WorkspaceError::NotInJjRepo
@@ -55,7 +55,7 @@ impl JjCommand {
         if let Some(n) = name {
             args.extend(["--name", n]);
         }
-        let output = self.run(&args)?;
+        let output = self.exec(&args)?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stderr_lower = stderr.to_lowercase();
@@ -80,7 +80,7 @@ impl JjCommand {
     /// Runs `jj workspace list` and parses entries into [`JjWorkspaceEntry`].
     pub fn workspace_list(&self) -> Result<Vec<JjWorkspaceEntry>, WorkspaceError> {
         let templated =
-            self.run(&["workspace", "list", "-T", r#"name ++ "\t" ++ root ++ "\n""#])?;
+            self.exec(&["workspace", "list", "-T", r#"name ++ "\t" ++ root ++ "\n""#])?;
         if templated.status.success() {
             let stdout = String::from_utf8_lossy(&templated.stdout);
             let mut entries = Vec::new();
@@ -108,7 +108,7 @@ impl JjCommand {
         }
 
         // Fallback to plain workspace list if template output failed
-        let fallback = self.run(&["workspace", "list"])?;
+        let fallback = self.exec(&["workspace", "list"])?;
         if !fallback.status.success() {
             let fb_stderr = String::from_utf8_lossy(&fallback.stderr);
             let fb_lower = fb_stderr.to_lowercase();
@@ -139,7 +139,7 @@ impl JjCommand {
     /// Runs `jj workspace add <path> --name <name>`.
     pub fn workspace_add(&self, path: &Path, name: &str) -> Result<(), WorkspaceError> {
         let path_str = path.to_string_lossy();
-        let output = self.run(&["workspace", "add", &path_str, "--name", name])?;
+        let output = self.exec(&["workspace", "add", &path_str, "--name", name])?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stderr_lower = stderr.to_lowercase();
@@ -153,7 +153,7 @@ impl JjCommand {
 
     /// Runs `jj workspace forget <name>`.
     pub fn workspace_forget(&self, name: &str) -> Result<(), WorkspaceError> {
-        let output = self.run(&["workspace", "forget", name])?;
+        let output = self.exec(&["workspace", "forget", name])?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stderr_lower = stderr.to_lowercase();
