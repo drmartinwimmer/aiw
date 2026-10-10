@@ -28,7 +28,7 @@ fn workspace_without_fence_json_defaults_to_shared_template() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let expected_tpl = aiw_dir.join("fence.jsonc").to_string_lossy().to_string();
     let expected_arg = format!("--settings {expected_tpl}");
-    expect_that!(stdout.as_ref(), contains_substring(expected_arg.as_str()));
+    expect_that!(stdout.as_ref(), contains_substring(expected_arg.as_ref()));
 }
 
 #[googletest::test]

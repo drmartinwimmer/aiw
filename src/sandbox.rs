@@ -308,10 +308,7 @@ mod tests {
         let args = builder.build_args().expect("build_args");
 
         let tpl_str = shared_template.display().to_string();
-        expect_that!(
-            args.as_slice(),
-            contains_subslice(&["--settings", &tpl_str])
-        );
+        expect_that!(&*args, contains_subslice(&["--settings", &tpl_str]));
     }
 
     #[googletest::test]
@@ -335,10 +332,7 @@ mod tests {
         let args = builder.build_args().expect("build_args");
 
         let local_str = local_fence.display().to_string();
-        expect_that!(
-            args.as_slice(),
-            contains_subslice(&["--settings", &local_str])
-        );
+        expect_that!(&*args, contains_subslice(&["--settings", &local_str]));
     }
 
     #[googletest::test]

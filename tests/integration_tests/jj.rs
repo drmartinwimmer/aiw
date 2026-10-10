@@ -23,7 +23,7 @@ fn workspace_creation_and_dry_run_in_real_jj_repo_succeeds() {
     expect_that!(stdout.as_ref(), contains_substring("--settings"));
 
     let fence_json_str = repo_root.join("fence.jsonc").to_string_lossy().to_string();
-    expect_that!(stdout.as_ref(), contains_substring(fence_json_str.as_str()));
+    expect_that!(stdout.as_ref(), contains_substring(fence_json_str.as_ref()));
     expect_that!(stdout.as_ref(), contains_substring("agy"));
     expect_that!(
         stdout.as_ref(),
