@@ -11,6 +11,6 @@ pub mod sandbox;
 pub mod workspace;
 
 pub use config::{ConfigInitError, ConfigInitializer, DEFAULT_AIW_TEMPLATE};
-pub(crate) mod herdr;
 pub(crate) mod tools;
+pub(crate) use tools::herdr;
 pub(crate) mod vcs;

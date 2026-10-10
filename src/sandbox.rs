@@ -3,7 +3,7 @@ use std::process::{Command, ExitStatus};
 
 #[cfg(not(test))]
 use crate::config::ConfigInitializer;
-use crate::tools::ensure_user_profile_bin_paths;
+use crate::tools::FenceCommand;
 use crate::workspace::Workspace;
 
 #[derive(Debug, thiserror::Error)]
@@ -151,20 +151,12 @@ impl<'a> SandboxBuilder<'a> {
     }
 
     fn construct_command(&self) -> Result<Command, SandboxError> {
-        let mut cmd = Command::new("fence");
-        cmd.current_dir(self.workspace_path);
+        let mut cmd = FenceCommand::create(self.workspace_path);
 
         self.append_settings_args(&mut cmd);
         cmd.arg("--");
         self.append_direnv_args(&mut cmd)?;
         cmd.args(self.command);
-
-        ensure_user_profile_bin_paths(&mut cmd);
-
-        // Ensure TMPDIR points to the workspace directory inside the sandbox so that
-        // temporary files are created on the same filesystem/mount, preventing EXDEV
-        // (Invalid cross-device link) errors during atomic renames in fence.
-        cmd.env("TMPDIR", self.workspace_path);
 
         Ok(cmd)
     }
