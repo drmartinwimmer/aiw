@@ -38,7 +38,7 @@ enum Commands {
 }
 
 impl Commands {
-    fn run(&self) -> Result<(), AppError> {
+    fn run(self) -> Result<(), AppError> {
         match self {
             Commands::Agy(cmd) => cmd.run(),
             Commands::Forget(cmd) => cmd.run(),
@@ -53,7 +53,7 @@ impl Commands {
 struct ListCommand {}
 
 impl ListCommand {
-    fn run(&self) -> Result<(), AppError> {
+    fn run(self) -> Result<(), AppError> {
         let current_dir = std::env::current_dir()?;
         let workspaces = Workspace::list_from_dir(&current_dir)?;
         for ws in workspaces {
@@ -84,7 +84,7 @@ pub enum ShellChoice {
 }
 
 impl CompletionCommand {
-    fn run(&self) -> Result<(), AppError> {
+    fn run(self) -> Result<(), AppError> {
         use clap_complete::env::{Bash, Elvish, EnvCompleter, Fish, Powershell, Zsh};
         let mut stdout = std::io::stdout();
         match self.shell {
@@ -133,7 +133,7 @@ struct ForgetCommand {
 }
 
 impl ForgetCommand {
-    fn run(&self) -> Result<(), AppError> {
+    fn run(self) -> Result<(), AppError> {
         let current_dir = std::env::current_dir()?;
         let workspace = Workspace::from_dir(&current_dir, &self.workspace_name)?;
         workspace.forget()?;
@@ -157,7 +157,7 @@ struct AgyCommand {
 }
 
 impl AgyCommand {
-    fn build_payload_command(&self) -> Vec<String> {
+    fn build_payload_command(mut self) -> Vec<String> {
         let mut cmd = vec!["agy".to_string()];
         if !self
             .extra_args
@@ -166,11 +166,11 @@ impl AgyCommand {
         {
             cmd.push("--dangerously-skip-permissions".to_string());
         }
-        cmd.extend(self.extra_args.clone());
+        cmd.append(&mut self.extra_args);
         cmd
     }
 
-    fn run(&self) -> Result<(), AppError> {
+    fn run(self) -> Result<(), AppError> {
         let current_dir = std::env::current_dir()?;
         let workspace = Workspace::from_dir(&current_dir, &self.workspace_name)?;
         let repo_root = workspace.repo_root();
@@ -182,16 +182,18 @@ impl AgyCommand {
             direnv.allow_workspace(workspace.path());
         }
 
+        let dry_run = self.dry_run;
+        let workspace_name = self.workspace_name.clone();
         let payload = self.build_payload_command();
         let builder =
             SandboxBuilder::for_workspace(&workspace, &payload).with_direnv(direnv.is_allowed());
 
-        if self.dry_run {
+        if dry_run {
             println!("{builder}");
             Ok(())
         } else if let Some(herdr) = Herdr::from_env() {
             let cmd = format!("{builder}");
-            herdr.run_command(&self.workspace_name, &cmd, "agy", Some(workspace.path()))?;
+            herdr.run_command(&workspace_name, &cmd, "agy", Some(workspace.path()))?;
             Ok(())
         } else {
             builder.run()?;
@@ -207,8 +209,8 @@ struct ConfigCommand {
 }
 
 impl ConfigCommand {
-    fn run(&self) -> Result<(), AppError> {
-        match &self.command {
+    fn run(self) -> Result<(), AppError> {
+        match self.command {
             ConfigSubcommands::Init(args) => args.run(),
         }
     }
@@ -254,7 +256,7 @@ fn warn_already_exists(kind: &str, path: &Path) {
 }
 
 impl ConfigInitProjectSubcommand {
-    fn run(&self, global_force: bool) -> Result<(), AppError> {
+    fn run(self, global_force: bool) -> Result<(), AppError> {
         let force = self.force || global_force;
         let current_dir = std::env::current_dir()?;
         let project_dir = Vcs::from_path(&current_dir)
@@ -280,7 +282,7 @@ struct ConfigInitUserSubcommand {
 }
 
 impl ConfigInitUserSubcommand {
-    fn run(&self, global_force: bool) -> Result<(), AppError> {
+    fn run(self, global_force: bool) -> Result<(), AppError> {
         let force = self.force || global_force;
         match ConfigInitializer::init_user_config(force) {
             Ok(_) => Ok(()),
@@ -294,11 +296,12 @@ impl ConfigInitUserSubcommand {
 }
 
 impl ConfigInitArgs {
-    fn run(&self) -> Result<(), AppError> {
-        match &self.target {
-            Some(ConfigInitSubcommand::User(cmd)) => cmd.run(self.force),
-            Some(ConfigInitSubcommand::Project(cmd)) => cmd.run(self.force),
-            None => ConfigInitProjectSubcommand { force: self.force }.run(self.force),
+    fn run(self) -> Result<(), AppError> {
+        let force = self.force;
+        match self.target {
+            Some(ConfigInitSubcommand::User(cmd)) => cmd.run(force),
+            Some(ConfigInitSubcommand::Project(cmd)) => cmd.run(force),
+            None => ConfigInitProjectSubcommand { force }.run(force),
         }
     }
 }
