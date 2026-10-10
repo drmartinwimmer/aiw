@@ -135,32 +135,36 @@ mod tests {
         }
     }
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     #[googletest::test]
-    fn from_dir_at_repo_root_discovers_jj_root() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn from_dir_at_repo_root_discovers_jj_root() -> TestResult {
+        let dir = tempfile::tempdir()?;
         let repo_root = dir.path();
         init_test_jj_repo(repo_root);
 
-        let jj = Jj::from_dir(repo_root).expect("from_dir");
+        let jj = Jj::from_dir(repo_root)?;
         expect_that!(jj.repo_root(), eq(repo_root));
+        Ok(())
     }
 
     #[googletest::test]
-    fn from_dir_in_deep_subdirectory_discovers_jj_root() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn from_dir_in_deep_subdirectory_discovers_jj_root() -> TestResult {
+        let dir = tempfile::tempdir()?;
         let repo_root = dir.path();
         init_test_jj_repo(repo_root);
 
         let sub = repo_root.join("deep").join("nested");
-        std::fs::create_dir_all(&sub).expect("create deep dir");
+        std::fs::create_dir_all(&sub)?;
 
-        let jj = Jj::from_dir(&sub).expect("from_dir in sub");
+        let jj = Jj::from_dir(&sub)?;
         expect_that!(jj.repo_root(), eq(repo_root));
+        Ok(())
     }
 
     #[googletest::test]
-    fn from_dir_outside_repo_returns_not_in_jj_repo() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn from_dir_outside_repo_returns_not_in_jj_repo() -> TestResult {
+        let dir = tempfile::tempdir()?;
         let non_repo = dir.path();
 
         let res = Jj::from_dir(non_repo);
@@ -168,74 +172,67 @@ mod tests {
             res,
             matches_pattern!(Err(matches_pattern!(WorkspaceError::NotInJjRepo)))
         );
+        Ok(())
     }
 
     #[googletest::test]
-    fn jj_workspace_lifecycle_operations() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn jj_workspace_lifecycle_operations() -> TestResult {
+        let dir = tempfile::tempdir()?;
         let repo_root = dir.path();
         init_test_jj_repo(repo_root);
 
-        let jj = Jj::from_dir(repo_root).expect("from_dir");
+        let jj = Jj::from_dir(repo_root)?;
         let ws_name = "test-jj-ws";
         let rel_ws_path = Path::new(".workspaces").join(ws_name);
         let abs_ws_path = repo_root.join(&rel_ws_path);
 
-        expect_that!(
-            jj.is_workspace_registered(ws_name).expect("is_registered"),
-            is_false()
-        );
+        expect_that!(jj.is_workspace_registered(ws_name)?, is_false());
         expect_that!(jj.workspace_exists(&abs_ws_path), is_false());
 
-        std::fs::create_dir_all(repo_root.join(".workspaces")).expect("create .workspaces");
-        jj.add_workspace(&rel_ws_path, ws_name)
-            .expect("add_workspace");
+        std::fs::create_dir_all(repo_root.join(".workspaces"))?;
+        jj.add_workspace(&rel_ws_path, ws_name)?;
 
-        expect_that!(
-            jj.is_workspace_registered(ws_name).expect("is_registered"),
-            is_true()
-        );
+        expect_that!(jj.is_workspace_registered(ws_name)?, is_true());
         expect_that!(jj.workspace_exists(&abs_ws_path), is_true());
 
-        jj.forget_workspace(ws_name).expect("forget_workspace");
-        expect_that!(
-            jj.is_workspace_registered(ws_name).expect("is_registered"),
-            is_false()
-        );
+        jj.forget_workspace(ws_name)?;
+        expect_that!(jj.is_workspace_registered(ws_name)?, is_false());
+        Ok(())
     }
 
     #[googletest::test]
-    fn jj_list_workspaces_lists_added_workspaces_and_ignores_default() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn jj_list_workspaces_lists_added_workspaces_and_ignores_default() -> TestResult {
+        let dir = tempfile::tempdir()?;
         let repo_root = dir.path();
         init_test_jj_repo(repo_root);
 
-        let jj = Jj::from_dir(repo_root).expect("from_dir");
-        let initial = jj.list_workspaces().expect("list initial");
+        let jj = Jj::from_dir(repo_root)?;
+        let initial = jj.list_workspaces()?;
         expect_that!(initial, is_empty());
 
         let rel1 = Path::new(".workspaces").join("ws-1");
         let rel2 = Path::new(".workspaces").join("ws-2");
-        std::fs::create_dir_all(repo_root.join(".workspaces")).expect("create .workspaces");
-        jj.add_workspace(&rel1, "ws-1").expect("add ws-1");
-        jj.add_workspace(&rel2, "ws-2").expect("add ws-2");
+        std::fs::create_dir_all(repo_root.join(".workspaces"))?;
+        jj.add_workspace(&rel1, "ws-1")?;
+        jj.add_workspace(&rel2, "ws-2")?;
 
-        let listed = jj.list_workspaces().expect("list after adding");
+        let listed = jj.list_workspaces()?;
         expect_that!(listed, unordered_elements_are![eq("ws-1"), eq("ws-2")]);
 
         // When inside a workspace, Jj::from_dir still resolves to the main repo root
         let ws1_path = repo_root.join(&rel1);
-        let jj_from_ws = Jj::from_dir(&ws1_path).expect("from_dir inside ws");
+        let jj_from_ws = Jj::from_dir(&ws1_path)?;
         expect_that!(jj_from_ws.repo_root(), eq(repo_root));
-        let listed_from_ws = jj_from_ws.list_workspaces().expect("list from ws");
+        let listed_from_ws = jj_from_ws.list_workspaces()?;
         expect_that!(
             listed_from_ws,
             unordered_elements_are![eq("ws-1"), eq("ws-2")]
         );
 
         // After forgetting ws-1, only ws-2 remains
-        jj.forget_workspace("ws-1").expect("forget ws-1");
-        let listed_after_forget = jj.list_workspaces().expect("list after forget");
+        jj.forget_workspace("ws-1")?;
+        let listed_after_forget = jj.list_workspaces()?;
         expect_that!(listed_after_forget, elements_are![eq("ws-2")]);
+        Ok(())
     }
 }

@@ -4,9 +4,11 @@ use aiw::workspace::Workspace;
 use googletest::prelude::*;
 use std::process::Command;
 
+type TestResult = Result<(), Box<dyn std::error::Error>>;
+
 #[googletest::test]
-fn workspace_creation_and_dry_run_in_real_jj_repo_succeeds() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn workspace_creation_and_dry_run_in_real_jj_repo_succeeds() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let repo_root = temp_dir.path();
     init_test_jj_repo(repo_root);
     write_test_fence_json(repo_root);
@@ -29,11 +31,12 @@ fn workspace_creation_and_dry_run_in_real_jj_repo_succeeds() {
         stdout.as_ref(),
         contains_substring("--dangerously-skip-permissions")
     );
+    Ok(())
 }
 
 #[googletest::test]
-fn idempotent_workspace_reuse_in_real_jj_repo_succeeds() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn idempotent_workspace_reuse_in_real_jj_repo_succeeds() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let repo_root = temp_dir.path();
     init_test_jj_repo(repo_root);
     write_test_fence_json(repo_root);
@@ -57,16 +60,16 @@ fn idempotent_workspace_reuse_in_real_jj_repo_succeeds() {
     let ws_list = Command::new("jj")
         .args(["--no-pager", "workspace", "list"])
         .current_dir(repo_root)
-        .output()
-        .expect("jj workspace list");
+        .output()?;
     expect_that!(ws_list.status.success(), is_true());
     let list_stdout = String::from_utf8_lossy(&ws_list.stdout);
     expect_that!(list_stdout.as_ref(), contains_substring("reused-workspace"));
+    Ok(())
 }
 
 #[googletest::test]
-fn missing_jj_repository_fails_with_clear_error() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn missing_jj_repository_fails_with_clear_error() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let non_repo = temp_dir.path();
 
     let output = run_aiw(non_repo, &["agy", "test-workspace", "--dry-run"]);
@@ -78,18 +81,19 @@ fn missing_jj_repository_fails_with_clear_error() {
         stderr.as_ref(),
         contains_substring("Error: Not inside a Jujutsu or Git repository")
     );
+    Ok(())
 }
 
 #[googletest::test]
-fn live_fence_execution_in_temp_workspace_runs_and_verifies_containment() {
+fn live_fence_execution_in_temp_workspace_runs_and_verifies_containment() -> TestResult {
     if !can_run_fence() || which::which("agy").is_err() {
         eprintln!(
             "Skipping live_fence_execution test: fence sandbox or agy unavailable in this environment"
         );
-        return;
+        return Ok(());
     }
 
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let temp_dir = tempfile::tempdir()?;
     let repo_root = temp_dir.path();
     init_test_jj_repo(repo_root);
     write_test_fence_json(repo_root);
@@ -98,42 +102,36 @@ fn live_fence_execution_in_temp_workspace_runs_and_verifies_containment() {
     let output = run_aiw(repo_root, &["agy", "live-workspace", "--", "--version"]);
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stdout.trim().is_empty(),
-        "run_aiw stdout was empty! exit_code={:?}, stdout={}, stderr={}",
-        output.status.code(),
-        stdout,
-        stderr
-    );
+    expect_that!(stdout.trim().is_empty(), is_false());
 
     let ws_path = repo_root.join(".workspaces").join("live-workspace");
     expect_that!(ws_path.exists(), is_true());
     expect_that!(ws_path.join(".jj").exists(), is_true());
+    Ok(())
 }
 
 #[googletest::test]
-fn jj_commands_in_fence_sandbox_execute_successfully_and_persist_commits() {
+fn jj_commands_in_fence_sandbox_execute_successfully_and_persist_commits() -> TestResult {
     if !can_run_fence() || which::which("jj").is_err() {
         eprintln!(
             "Skipping jj_commands_in_fence_sandbox test: fence sandbox or jj unavailable in this environment"
         );
-        return;
+        return Ok(());
     }
 
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let temp_dir = tempfile::tempdir()?;
     let repo_root = temp_dir.path();
     init_test_jj_repo(repo_root);
     write_test_fence_json(repo_root);
 
-    let ws = Workspace::new(repo_root, "jj-fence-test").expect("Workspace::new");
-    ws.ensure().expect("ensure workspace");
+    let ws = Workspace::new(repo_root, "jj-fence-test")?;
+    ws.ensure()?;
     let ws_path = ws.path();
 
     let status_cmd = vec!["jj".into(), "--no-pager".into(), "status".into()];
     let builder = SandboxBuilder::new(ws_path, repo_root, &status_cmd);
-    let mut status_cmd = builder.build_command().expect("build_command");
-    let status_output = status_cmd.output().expect("execute fence jj status");
+    let mut status_cmd = builder.build_command()?;
+    let status_output = status_cmd.output()?;
 
     expect_that!(status_output.status.success(), is_true());
     let status_stdout = String::from_utf8_lossy(&status_output.stdout);
@@ -151,22 +149,16 @@ fn jj_commands_in_fence_sandbox_execute_successfully_and_persist_commits() {
         "commit from inside fence".into(),
     ];
     let builder2 = SandboxBuilder::new(ws_path, repo_root, &new_cmd);
-    let mut new_cmd = builder2.build_command().expect("build_command");
-    let new_output = new_cmd.output().expect("execute fence jj new");
+    let mut new_cmd = builder2.build_command()?;
+    let new_output = new_cmd.output()?;
 
-    assert!(
-        new_output.status.success(),
-        "fence jj new failed: stdout={}, stderr={}",
-        String::from_utf8_lossy(&new_output.stdout),
-        String::from_utf8_lossy(&new_output.stderr)
-    );
+    expect_that!(new_output.status.success(), is_true());
 
     // Verify change is recorded and visible to host jj
     let log_output = Command::new("jj")
         .args(["--no-pager", "log", "-r", "@", "--ignore-working-copy"])
         .current_dir(ws_path)
-        .output()
-        .expect("host jj log");
+        .output()?;
 
     expect_that!(log_output.status.success(), is_true());
     let log_stdout = String::from_utf8_lossy(&log_output.stdout);
@@ -174,11 +166,12 @@ fn jj_commands_in_fence_sandbox_execute_successfully_and_persist_commits() {
         log_stdout.as_ref(),
         contains_substring("commit from inside fence")
     );
+    Ok(())
 }
 
 #[googletest::test]
-fn forget_subcommand_removes_workspace_from_jj_list() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn forget_subcommand_removes_workspace_from_jj_list() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let repo_root = temp_dir.path();
     init_test_jj_repo(repo_root);
     write_test_fence_json(repo_root);
@@ -194,8 +187,7 @@ fn forget_subcommand_removes_workspace_from_jj_list() {
     let list_before = Command::new("jj")
         .args(["--no-pager", "workspace", "list"])
         .current_dir(repo_root)
-        .output()
-        .expect("jj workspace list");
+        .output()?;
     expect_that!(
         String::from_utf8_lossy(&list_before.stdout).as_ref(),
         contains_substring("ws-to-forget")
@@ -209,8 +201,7 @@ fn forget_subcommand_removes_workspace_from_jj_list() {
     let list_after = Command::new("jj")
         .args(["--no-pager", "workspace", "list"])
         .current_dir(repo_root)
-        .output()
-        .expect("jj workspace list");
+        .output()?;
     expect_that!(
         String::from_utf8_lossy(&list_after.stdout).as_ref(),
         not(contains_substring("ws-to-forget"))
@@ -219,58 +210,58 @@ fn forget_subcommand_removes_workspace_from_jj_list() {
         repo_root.join(".workspaces").join("ws-to-forget").exists(),
         is_false()
     );
+    Ok(())
 }
 
 #[googletest::test]
-fn recreating_forgotten_workspace_calls_direnv_allow() {
+fn recreating_forgotten_workspace_calls_direnv_allow() -> TestResult {
     if which::which("direnv").is_err() {
         eprintln!("Skipping recreating_forgotten_workspace_calls_direnv_allow: direnv not found");
-        return;
+        return Ok(());
     }
 
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = tempfile::tempdir()?;
     let repo_root = dir.path();
     init_test_jj_repo(repo_root);
     write_test_fence_json(repo_root);
 
     let root_envrc = repo_root.join(".envrc");
-    std::fs::write(&root_envrc, "export ROOT_VAR=ok\n").expect("write root .envrc");
+    std::fs::write(&root_envrc, "export ROOT_VAR=ok\n")?;
     let status = Command::new("jj")
         .args(["--no-pager", "commit", "-m", "initial"])
         .current_dir(repo_root)
-        .status()
-        .expect("jj commit");
-    assert!(status.success());
+        .status()?;
+    expect_that!(status.success(), is_true());
 
     let allow_res = Command::new("direnv")
         .args(["allow"])
         .current_dir(repo_root)
-        .output()
-        .expect("allow root");
-    assert!(allow_res.status.success());
+        .output()?;
+    expect_that!(allow_res.status.success(), is_true());
 
     // 1. Initial creation
     let out1 = run_aiw(repo_root, &["agy", "recreated-ws", "--dry-run"]);
-    assert!(out1.status.success());
+    expect_that!(out1.status.success(), is_true());
     let ws_path = repo_root.join(".workspaces").join("recreated-ws");
     expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_path), is_true());
 
     // 2. Forget workspace
     let forget_out = run_aiw(repo_root, &["forget", "recreated-ws"]);
-    assert!(forget_out.status.success());
+    expect_that!(forget_out.status.success(), is_true());
     expect_that!(ws_path.exists(), is_false());
 
     // 3. Re-create workspace with aiw
     let out2 = run_aiw(repo_root, &["agy", "recreated-ws", "--dry-run"]);
-    assert!(out2.status.success());
+    expect_that!(out2.status.success(), is_true());
 
     // 4. Must have called direnv allow again because it's a re-created new workspace!
     expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_path), is_true());
+    Ok(())
 }
 
 #[googletest::test]
-fn list_subcommand_in_jj_repo_lists_all_workspaces() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn list_subcommand_in_jj_repo_lists_all_workspaces() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let repo_root = temp_dir.path();
     init_test_jj_repo(repo_root);
     write_test_fence_json(repo_root);
@@ -322,4 +313,5 @@ fn list_subcommand_in_jj_repo_lists_all_workspaces() {
         String::from_utf8_lossy(&out_after_forget.stdout).as_ref(),
         eq("ws-second\n")
     );
+    Ok(())
 }
