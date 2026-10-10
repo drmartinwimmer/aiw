@@ -13,6 +13,7 @@
 - Maintain documentation and existing comments unless requested otherwise.
 - Keep the codebase lightweight without unnecessary dependencies.
 - Follow Rust best practices and maintain clean compiler/clippy runs.
+- Run `purist` to enforce AST and code hygiene checks; before submitting any change or PR, `purist` must run and pass cleanly.
 
 ## 3. Commit Messages & Conventional Commits
 

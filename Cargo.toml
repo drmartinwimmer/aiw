@@ -1,3 +1,5 @@
+[workspace]
+
 [package]
 name = "ai-workspace"
 version = "0.4.0"
@@ -33,10 +35,7 @@ which = "8.0"
 googletest = "0.14"
 tempfile = "3.27"
 
-[lints]
-workspace = true
-
-[workspace.lints.clippy]
+[lints.clippy]
 # Don't Panic - prevent panics from unwraps and unsafe slicing or indexing
 string_slice = "warn"
 indexing_slicing = "warn"
@@ -83,3 +82,15 @@ dbg_macro = "warn"
 # a deliberate #[expect(..., reason = "…")] rather than a silent #[allow]
 allow_attributes = "warn"
 allow_attributes_without_reason = "warn"
+
+[package.metadata.purist.lints]
+centralized_command_execution = "allow"
+cli_run_consumes_self = "allow"
+free_functions = "allow"
+googletest_conventions = "allow"
+max_file_lines = "allow"
+no_env_access_outside_config = "allow"
+no_println_in_libraries = "allow"
+no_unsafe_in_tests = "allow"
+test_matcher_borrow_simplification = "allow"
+use_declarations_over_qualified_paths = "allow"

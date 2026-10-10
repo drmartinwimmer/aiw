@@ -32,6 +32,12 @@ jobs:
       - name: Check Clippy lints
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      - name: Install Purist
+        run: cargo install purist --locked
+
+      - name: Run Purist AST linter
+        run: purist
+
       - name: Verify package & metadata
         run: cargo publish --dry-run
 
