@@ -1,6 +1,10 @@
+use aiw::direnv::Direnv;
+use aiw::sandbox::SandboxBuilder;
+use aiw::workspace::Workspace;
 use googletest::prelude::*;
 use std::path::Path;
 use std::process::{Command, Output};
+use tempfile::NamedTempFile;
 
 fn can_run_fence() -> bool {
     // Nested container/LSM sandboxing inside the Nix daemon build sandbox
@@ -264,12 +268,12 @@ fn jj_commands_in_fence_sandbox_execute_successfully_and_persist_commits() {
     init_test_jj_repo(repo_root);
     write_test_fence_json(repo_root);
 
-    let ws = aiw::workspace::Workspace::new(repo_root, "jj-fence-test").expect("Workspace::new");
+    let ws = Workspace::new(repo_root, "jj-fence-test").expect("Workspace::new");
     ws.ensure().expect("ensure workspace");
     let ws_path = ws.path();
 
     let status_cmd = vec!["jj".into(), "--no-pager".into(), "status".into()];
-    let builder = aiw::sandbox::SandboxBuilder::new(ws_path, repo_root, &status_cmd);
+    let builder = SandboxBuilder::new(ws_path, repo_root, &status_cmd);
     let mut status_cmd = builder.build_command().expect("build_command");
     let status_output = status_cmd.output().expect("execute fence jj status");
 
@@ -288,7 +292,7 @@ fn jj_commands_in_fence_sandbox_execute_successfully_and_persist_commits() {
         "-m".into(),
         "commit from inside fence".into(),
     ];
-    let builder2 = aiw::sandbox::SandboxBuilder::new(ws_path, repo_root, &new_cmd);
+    let builder2 = SandboxBuilder::new(ws_path, repo_root, &new_cmd);
     let mut new_cmd = builder2.build_command().expect("build_command");
     let new_output = new_cmd.output().expect("execute fence jj new");
 
@@ -435,7 +439,7 @@ fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
         .expect("direnv allow on repo root");
     assert!(allow_repo.status.success(), "allow repo root failed");
 
-    let ws = aiw::workspace::Workspace::new(repo_root, "direnv-ws").expect("Workspace::new");
+    let ws = Workspace::new(repo_root, "direnv-ws").expect("Workspace::new");
     ws.ensure().expect("ensure_workspace");
     let ws_path = ws.path().to_path_buf();
 
@@ -448,7 +452,7 @@ fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
     .expect("write .envrc");
 
     // Allow direnv in workspace for direct SandboxBuilder execution
-    let direnv = aiw::direnv::Direnv::new(repo_root);
+    let direnv = Direnv::new(repo_root);
     direnv.allow_workspace(&ws_path);
 
     let sh_bin = if Path::new("/bin/sh").exists() {
@@ -461,8 +465,7 @@ fn sandbox_command_runs_in_correct_working_directory_and_loads_direnv() {
         "-c".to_string(),
         "echo CWD=$PWD; echo VAL=$AIW_DIRENV_LOADED".to_string(),
     ];
-    let builder =
-        aiw::sandbox::SandboxBuilder::new(&ws_path, repo_root, &test_cmd).with_direnv(true);
+    let builder = SandboxBuilder::new(&ws_path, repo_root, &test_cmd).with_direnv(true);
     let mut cmd = builder.build_command().expect("build_command");
     let output = cmd.output().expect("execute sandbox command");
 
@@ -503,21 +506,21 @@ fn sandbox_does_not_auto_allow_direnv_when_repo_root_is_not_allowed() {
     let repo_envrc = repo_root.join(".envrc");
     std::fs::write(&repo_envrc, "export BLOCKED=1\n").expect("write repo .envrc");
 
-    let ws = aiw::workspace::Workspace::new(repo_root, "unallowed-ws").expect("Workspace::new");
+    let ws = Workspace::new(repo_root, "unallowed-ws").expect("Workspace::new");
     ws.ensure().expect("ensure workspace");
     let ws_path = ws.path().to_path_buf();
     let ws_envrc = ws_path.join(".envrc");
     std::fs::write(&ws_envrc, "export BLOCKED=1\n").expect("write ws .envrc");
 
     // repo_root is NOT allowed
-    expect_that!(aiw::direnv::Direnv::is_dir_allowed(repo_root), is_false());
+    expect_that!(Direnv::is_dir_allowed(repo_root), is_false());
 
     // Call allow_workspace with Direnv
-    let direnv = aiw::direnv::Direnv::new(repo_root);
+    let direnv = Direnv::new(repo_root);
     direnv.allow_workspace(&ws_path);
 
     // ws_path should NOT have been allowed!
-    expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_path), is_false());
+    expect_that!(Direnv::is_dir_allowed(&ws_path), is_false());
 }
 
 #[googletest::test]
@@ -724,7 +727,7 @@ fn aiw_in_herdr_creates_workspace_tab_informs_agent_and_executes() {
     init_test_jj_repo(repo);
     write_test_fence_json(repo);
 
-    let log_file = tempfile::NamedTempFile::new().expect("temp file");
+    let log_file = NamedTempFile::new().expect("temp file");
     let log_path = log_file.path().to_string_lossy().to_string();
 
     let script_path = dir.path().join("mock_herdr.sh");
@@ -783,7 +786,7 @@ fn aiw_in_herdr_with_dry_run_does_not_call_herdr() {
     init_test_jj_repo(repo);
     write_test_fence_json(repo);
 
-    let log_file = tempfile::NamedTempFile::new().expect("temp file");
+    let log_file = NamedTempFile::new().expect("temp file");
     let log_path = log_file.path().to_string_lossy().to_string();
 
     let script_path = dir.path().join("mock_herdr.sh");

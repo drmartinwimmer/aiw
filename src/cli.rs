@@ -7,6 +7,7 @@ use crate::sandbox::{SandboxBuilder, SandboxError};
 use crate::vcs::Vcs;
 use crate::workspace::{Workspace, WorkspaceError};
 use clap::{Parser, Subcommand};
+use clap_complete::engine::CompletionCandidate;
 
 #[derive(Parser, Debug)]
 #[command(name = "aiw", about = "AI Workspace Launcher")]
@@ -108,9 +109,7 @@ impl CompletionCommand {
     }
 }
 
-fn complete_workspaces(
-    current: &std::ffi::OsStr,
-) -> Vec<clap_complete::engine::CompletionCandidate> {
+fn complete_workspaces(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {
     let current_str = current.to_str().unwrap_or("");
     let Ok(current_dir) = std::env::current_dir() else {
         return Vec::new();
@@ -121,7 +120,7 @@ fn complete_workspaces(
     workspaces
         .into_iter()
         .filter(|ws| ws.name().starts_with(current_str))
-        .map(|ws| clap_complete::engine::CompletionCandidate::new(ws.name()))
+        .map(|ws| CompletionCandidate::new(ws.name()))
         .collect()
 }
 
