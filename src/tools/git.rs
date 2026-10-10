@@ -44,7 +44,7 @@ impl GitCommand {
         cmd
     }
 
-    fn run(&self, args: &[&str]) -> Result<std::process::Output, WorkspaceError> {
+    fn exec(&self, args: &[&str]) -> Result<std::process::Output, WorkspaceError> {
         self.build_cmd(args).output().map_err(|err| {
             if err.kind() == std::io::ErrorKind::NotFound {
                 WorkspaceError::NotInGitRepo
@@ -56,7 +56,7 @@ impl GitCommand {
 
     /// Runs `git rev-parse --show-toplevel` and returns the worktree root.
     pub fn show_toplevel(&self) -> Result<PathBuf, WorkspaceError> {
-        let output = self.run(&["rev-parse", "--show-toplevel"])?;
+        let output = self.exec(&["rev-parse", "--show-toplevel"])?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             if stderr.to_lowercase().contains("not a git repository") {
@@ -79,7 +79,7 @@ impl GitCommand {
 
     /// Runs `git worktree list --porcelain` and parses each entry into [`GitWorktreeEntry`].
     pub fn worktree_list(&self) -> Result<Vec<GitWorktreeEntry>, WorkspaceError> {
-        let output = self.run(&["worktree", "list", "--porcelain"])?;
+        let output = self.exec(&["worktree", "list", "--porcelain"])?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             if stderr.to_lowercase().contains("not a git repository") {
@@ -143,7 +143,7 @@ impl GitCommand {
 
     /// Runs `git worktree prune`.
     pub fn worktree_prune(&self) -> Result<(), WorkspaceError> {
-        let output = self.run(&["worktree", "prune"])?;
+        let output = self.exec(&["worktree", "prune"])?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             if stderr.to_lowercase().contains("not a git repository") {
@@ -157,7 +157,7 @@ impl GitCommand {
     /// Runs `git worktree add <path>`.
     pub fn worktree_add(&self, path: &Path) -> Result<(), WorkspaceError> {
         let path_str = path.to_string_lossy();
-        let output = self.run(&["worktree", "add", &path_str])?;
+        let output = self.exec(&["worktree", "add", &path_str])?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             if stderr.to_lowercase().contains("not a git repository") {
@@ -177,7 +177,7 @@ impl GitCommand {
         }
         args.push(&path_str);
 
-        let output = self.run(&args)?;
+        let output = self.exec(&args)?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stderr_lower = stderr.to_lowercase();
