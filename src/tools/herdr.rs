@@ -444,6 +444,8 @@ mod tests {
     use super::*;
     use googletest::prelude::*;
     use tempfile::NamedTempFile;
+
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
     fn create_mock_script(script_content: &str) -> (tempfile::TempDir, PathBuf) {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let script_path = temp_dir.path().join("mock_herdr.sh");
@@ -496,7 +498,9 @@ mod tests {
 
         let detected = Herdr::from_env_with(get_var);
         expect_that!(detected, some(anything()));
-        let herdr = detected.expect("detected");
+        let Some(herdr) = detected else {
+            return;
+        };
         expect_that!(herdr.pane_id(), some(eq("w1:p1")));
         expect_that!(herdr.tab_id(), some(eq("w1:t1")));
         expect_that!(herdr.workspace_id(), some(eq("w1")));
@@ -522,7 +526,9 @@ mod tests {
 
         let detected = Herdr::from_env_with(get_var);
         expect_that!(detected, some(anything()));
-        let herdr = detected.expect("from_env");
+        let Some(herdr) = detected else {
+            return;
+        };
         expect_that!(herdr.binary(), eq(Path::new("/custom/bin/herdr")));
         expect_that!(herdr.workspace_id(), some(eq("ws-42")));
         expect_that!(herdr.tab_id(), some(eq("ws-42:t9")));
@@ -534,7 +540,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn create_tab_parses_json_response_and_returns_created_tab() {
+    fn create_tab_parses_json_response_and_returns_created_tab() -> TestResult {
         let script = r#"#!/bin/sh
 if [ "$1" = "tab" ] && [ "$2" = "create" ]; then
     echo '{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"w1:p8"},"tab":{"label":"my-workspace","tab_id":"w1:t8","workspace_id":"w1"},"type":"tab_created"}}'
@@ -548,15 +554,16 @@ exit 1
 
         let res = herdr.create_tab("my-workspace", Some(Path::new("/my/cwd")), true);
         expect_that!(res, ok(anything()));
-        let created = res.expect("created tab");
+        let created = res?;
         expect_that!(&created.tab_id, eq("w1:t8"));
         expect_that!(&created.root_pane_id, eq("w1:p8"));
         expect_that!(&created.label, eq("my-workspace"));
         expect_that!(created.workspace_id.as_deref(), some(eq("w1")));
+        Ok(())
     }
 
     #[googletest::test]
-    fn get_tab_and_is_current_tab_named_checks_label() {
+    fn get_tab_and_is_current_tab_named_checks_label() -> TestResult {
         let script = r#"#!/bin/sh
 if [ "$1" = "tab" ] && [ "$2" = "get" ] && [ "$3" = "w1:t3" ]; then
     echo '{"id":"cli:tab:get","result":{"tab":{"label":"feature-branch","number":3,"tab_id":"w1:t3","workspace_id":"w1"},"type":"tab_info"}}'
@@ -571,13 +578,14 @@ exit 1
         expect_that!(herdr.is_current_tab_named("feature-branch"), is_true());
         expect_that!(herdr.is_current_tab_named("different-branch"), is_false());
 
-        let tab = herdr.get_tab("w1:t3").expect("get_tab");
+        let tab = herdr.get_tab("w1:t3")?;
         expect_that!(tab.label.as_deref(), some(eq("feature-branch")));
+        Ok(())
     }
 
     #[googletest::test]
-    fn report_agent_and_inform_agent_sends_expected_cli_arguments() {
-        let log_file = NamedTempFile::new().expect("temp file");
+    fn report_agent_and_inform_agent_sends_expected_cli_arguments() -> TestResult {
+        let log_file = NamedTempFile::new()?;
         let log_path = log_file.path().to_string_lossy().to_string();
 
         let script = format!(
@@ -590,20 +598,19 @@ exit 0
         let (_dir, script_path) = create_mock_script(&script);
         let herdr = Herdr::new(script_path);
 
-        herdr
-            .inform_agent("w1:p99", "agy")
-            .expect("inform_agent should succeed");
+        herdr.inform_agent("w1:p99", "agy")?;
 
-        let logged = std::fs::read_to_string(&log_path).expect("read log");
+        let logged = std::fs::read_to_string(&log_path)?;
         expect_that!(
             &logged,
             contains_substring("pane report-agent --source aiw --agent agy --state working w1:p99")
         );
+        Ok(())
     }
 
     #[googletest::test]
-    fn execute_in_pane_sends_command_via_pane_run() {
-        let log_file = NamedTempFile::new().expect("temp file");
+    fn execute_in_pane_sends_command_via_pane_run() -> TestResult {
+        let log_file = NamedTempFile::new()?;
         let log_path = log_file.path().to_string_lossy().to_string();
 
         let script = format!(
@@ -616,20 +623,19 @@ exit 0
         let (_dir, script_path) = create_mock_script(&script);
         let herdr = Herdr::new(script_path);
 
-        herdr
-            .execute_in_pane("w1:p55", "echo hello world")
-            .expect("execute_in_pane should succeed");
+        herdr.execute_in_pane("w1:p55", "echo hello world")?;
 
-        let logged = std::fs::read_to_string(&log_path).expect("read log");
+        let logged = std::fs::read_to_string(&log_path)?;
         expect_that!(
             &logged,
             contains_substring("pane run w1:p55 echo hello world")
         );
+        Ok(())
     }
 
     #[googletest::test]
-    fn run_command_decides_to_create_tab_when_not_in_workspace_tab() {
-        let log_file = NamedTempFile::new().expect("temp file");
+    fn run_command_decides_to_create_tab_when_not_in_workspace_tab() -> TestResult {
+        let log_file = NamedTempFile::new()?;
         let log_path = log_file.path().to_string_lossy().to_string();
 
         let script = format!(
@@ -658,7 +664,7 @@ exit 0
         );
         expect_that!(res, ok(anything()));
 
-        let logged = std::fs::read_to_string(&log_path).expect("read log");
+        let logged = std::fs::read_to_string(&log_path)?;
         expect_that!(
             &logged,
             contains_substring("tab create --label ws-test --focus --cwd /tmp/test")
@@ -671,11 +677,12 @@ exit 0
             &logged,
             contains_substring("pane run w1:p12 fence -- echo 1")
         );
+        Ok(())
     }
 
     #[googletest::test]
-    fn run_command_decides_to_run_in_place_when_already_in_workspace_tab() {
-        let log_file = NamedTempFile::new().expect("temp file");
+    fn run_command_decides_to_run_in_place_when_already_in_workspace_tab() -> TestResult {
+        let log_file = NamedTempFile::new()?;
         let log_path = log_file.path().to_string_lossy().to_string();
 
         let script = format!(
@@ -697,7 +704,7 @@ exit 0
         let res = herdr.run_command("ws-current", "true", "agy", None);
         expect_that!(res, ok(anything()));
 
-        let logged = std::fs::read_to_string(&log_path).expect("read log");
+        let logged = std::fs::read_to_string(&log_path)?;
         // Must inform Herdr about agent on current pane
         expect_that!(
             &logged,
@@ -705,6 +712,7 @@ exit 0
         );
         // Must NOT create a new tab
         expect_that!(&logged, not(contains_substring("tab create")));
+        Ok(())
     }
 
     #[googletest::test]

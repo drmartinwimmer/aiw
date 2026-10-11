@@ -219,22 +219,21 @@ bare
 ";
         let entries = GitCommand::parse_porcelain_worktree_list(sample);
         expect_that!(entries.len(), eq(4));
-        let e0 = entries.first().expect("entry 0");
+        let [e0, e1, e2, e3] = entries.as_slice() else {
+            return;
+        };
         expect_that!(e0.path, eq(&PathBuf::from("/home/user/repo")));
         expect_that!(e0.branch, some(eq("refs/heads/main")));
         expect_that!(e0.bare, is_false());
 
-        let e1 = entries.get(1).expect("entry 1");
         expect_that!(
             e1.path,
             eq(&PathBuf::from("/home/user/repo/.workspaces/feature-1"))
         );
         expect_that!(e1.branch, some(eq("refs/heads/feature-1")));
 
-        let e2 = entries.get(2).expect("entry 2");
         expect_that!(e2.detached, is_true());
 
-        let e3 = entries.get(3).expect("entry 3");
         expect_that!(e3.bare, is_true());
     }
 }

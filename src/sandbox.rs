@@ -225,22 +225,24 @@ mod tests {
         )
     }
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     #[googletest::test]
-    fn build_args_with_existing_fence_json_in_repo_root_passes_settings_flag() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
+    fn build_args_with_existing_fence_json_in_repo_root_passes_settings_flag() -> TestResult {
+        let temp_dir = tempfile::tempdir()?;
         let repo_root = temp_dir.path().join("repo");
         let workspace_path = repo_root.join(".workspaces").join("my-ws");
-        std::fs::create_dir_all(&workspace_path).expect("create ws");
+        std::fs::create_dir_all(&workspace_path)?;
 
         let fence_json = repo_root.join("fence.json");
-        std::fs::write(&fence_json, r#"{"extends": "code"}"#).expect("write fence.json");
+        std::fs::write(&fence_json, r#"{"extends": "code"}"#)?;
 
         let cmd = vec![
             "agy".to_string(),
             "--dangerously-skip-permissions".to_string(),
         ];
         let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd);
-        let args = builder.build_args().expect("build_args should succeed");
+        let args = builder.build_args()?;
 
         let fence_str = fence_json.display().to_string();
         expect_that!(&args[..], contains_subslice(&["--settings", &fence_str]));
@@ -248,125 +250,131 @@ mod tests {
             &args[..],
             contains_subslice(&["--", "agy", "--dangerously-skip-permissions"])
         );
+        Ok(())
     }
 
     #[googletest::test]
-    fn build_args_with_fence_jsonc_in_workspace_takes_precedence_over_repo_root() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
+    fn build_args_with_fence_jsonc_in_workspace_takes_precedence_over_repo_root() -> TestResult {
+        let temp_dir = tempfile::tempdir()?;
         let repo_root = temp_dir.path().join("repo");
         let workspace_path = repo_root.join(".workspaces").join("ws");
-        std::fs::create_dir_all(&workspace_path).expect("create ws");
+        std::fs::create_dir_all(&workspace_path)?;
 
         let root_fence = repo_root.join("fence.json");
-        std::fs::write(&root_fence, r#"{"extends": "code"}"#).expect("write root fence");
+        std::fs::write(&root_fence, r#"{"extends": "code"}"#)?;
         let ws_fence = workspace_path.join("fence.jsonc");
-        std::fs::write(&ws_fence, r#"{"extends": "code"}"#).expect("write ws fence");
+        std::fs::write(&ws_fence, r#"{"extends": "code"}"#)?;
 
         let cmd = vec!["agy".to_string()];
         let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd);
-        let args = builder.build_args().expect("build_args");
+        let args = builder.build_args()?;
 
         let ws_fence_str = ws_fence.display().to_string();
         expect_that!(&args[..], contains_subslice(&["--settings", &ws_fence_str]));
+        Ok(())
     }
 
     #[googletest::test]
-    fn build_args_without_any_fence_config_delegates_to_fence_discovery() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
+    fn build_args_without_any_fence_config_delegates_to_fence_discovery() -> TestResult {
+        let temp_dir = tempfile::tempdir()?;
         let repo_root = temp_dir.path().join("repo");
         let workspace_path = repo_root.join(".workspaces").join("ws");
-        std::fs::create_dir_all(&workspace_path).expect("create ws");
+        std::fs::create_dir_all(&workspace_path)?;
 
         let cmd = vec![
             "agy".to_string(),
             "--dangerously-skip-permissions".to_string(),
         ];
         let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd);
-        let args = builder.build_args().expect("build_args");
+        let args = builder.build_args()?;
 
         expect_that!(
             &args[..],
             elements_are![eq("--"), eq("agy"), eq("--dangerously-skip-permissions")]
         );
+        Ok(())
     }
 
     #[googletest::test]
-    fn build_args_discovers_shared_template_when_no_local_fence_config_exists() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
+    fn build_args_discovers_shared_template_when_no_local_fence_config_exists() -> TestResult {
+        let temp_dir = tempfile::tempdir()?;
         let repo_root = temp_dir.path().join("repo");
         let workspace_path = repo_root.join(".workspaces").join("ws");
         let shared_dir = temp_dir.path().join("shared");
-        std::fs::create_dir_all(&workspace_path).expect("create ws");
-        std::fs::create_dir_all(&shared_dir).expect("create shared dir");
+        std::fs::create_dir_all(&workspace_path)?;
+        std::fs::create_dir_all(&shared_dir)?;
 
         let shared_template = shared_dir.join("fence.jsonc");
-        std::fs::write(&shared_template, r#"{"extends": "code"}"#).expect("write shared template");
+        std::fs::write(&shared_template, r#"{"extends": "code"}"#)?;
 
         let cmd = vec!["agy".to_string()];
         let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd)
             .with_shared_config_dir(shared_dir.clone());
-        let args = builder.build_args().expect("build_args");
+        let args = builder.build_args()?;
 
         let tpl_str = shared_template.display().to_string();
         expect_that!(&*args, contains_subslice(&["--settings", &tpl_str]));
+        Ok(())
     }
 
     #[googletest::test]
-    fn build_args_local_fence_config_takes_precedence_over_shared_template() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
+    fn build_args_local_fence_config_takes_precedence_over_shared_template() -> TestResult {
+        let temp_dir = tempfile::tempdir()?;
         let repo_root = temp_dir.path().join("repo");
         let workspace_path = repo_root.join(".workspaces").join("ws");
         let shared_dir = temp_dir.path().join("shared");
-        std::fs::create_dir_all(&workspace_path).expect("create ws");
-        std::fs::create_dir_all(&shared_dir).expect("create shared dir");
+        std::fs::create_dir_all(&workspace_path)?;
+        std::fs::create_dir_all(&shared_dir)?;
 
         let shared_template = shared_dir.join("fence.jsonc");
-        std::fs::write(&shared_template, r#"{"extends": "code"}"#).expect("write shared template");
+        std::fs::write(&shared_template, r#"{"extends": "code"}"#)?;
 
         let local_fence = workspace_path.join("fence.jsonc");
-        std::fs::write(&local_fence, r#"{"extends": "code"}"#).expect("write local fence");
+        std::fs::write(&local_fence, r#"{"extends": "code"}"#)?;
 
         let cmd = vec!["agy".to_string()];
         let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd)
             .with_shared_config_dir(shared_dir);
-        let args = builder.build_args().expect("build_args");
+        let args = builder.build_args()?;
 
         let local_str = local_fence.display().to_string();
         expect_that!(&*args, contains_subslice(&["--settings", &local_str]));
+        Ok(())
     }
 
     #[googletest::test]
-    fn build_args_with_explicit_settings_path_uses_specified_path() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
+    fn build_args_with_explicit_settings_path_uses_specified_path() -> TestResult {
+        let temp_dir = tempfile::tempdir()?;
         let repo_root = temp_dir.path().join("repo");
         let workspace_path = repo_root.join(".workspaces").join("ws");
-        std::fs::create_dir_all(&workspace_path).expect("create ws");
+        std::fs::create_dir_all(&workspace_path)?;
 
         let custom_fence = temp_dir.path().join("custom-fence.json");
-        std::fs::write(&custom_fence, r#"{"extends": "code"}"#).expect("write custom fence");
+        std::fs::write(&custom_fence, r#"{"extends": "code"}"#)?;
 
         let cmd = vec!["agy".to_string()];
         let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd)
             .with_settings_path(&custom_fence);
-        let args = builder.build_args().expect("build_args");
+        let args = builder.build_args()?;
 
         let custom_str = custom_fence.display().to_string();
         expect_that!(&args[..], contains_subslice(&["--settings", &custom_str]));
+        Ok(())
     }
 
     #[googletest::test]
-    fn build_args_with_use_direnv_true_prepends_direnv_exec() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
+    fn build_args_with_use_direnv_true_prepends_direnv_exec() -> TestResult {
+        let temp_dir = tempfile::tempdir()?;
         let repo_root = temp_dir.path().join("repo");
         let workspace_path = repo_root.join(".workspaces").join("ws");
-        std::fs::create_dir_all(&workspace_path).expect("create ws");
+        std::fs::create_dir_all(&workspace_path)?;
 
         let cmd = vec![
             "agy".to_string(),
             "--dangerously-skip-permissions".to_string(),
         ];
         let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd).with_direnv(true);
-        let args = builder.build_args().expect("build_args");
+        let args = builder.build_args()?;
 
         expect_that!(
             &args[..],
@@ -379,44 +387,47 @@ mod tests {
                 "--dangerously-skip-permissions"
             ])
         );
+        Ok(())
     }
 
     #[googletest::test]
-    fn build_args_with_custom_command_executes_specified_command() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
+    fn build_args_with_custom_command_executes_specified_command() -> TestResult {
+        let temp_dir = tempfile::tempdir()?;
         let repo_root = temp_dir.path().join("repo");
         let workspace_path = repo_root.join(".workspaces").join("ws");
-        std::fs::create_dir_all(&workspace_path).expect("create ws");
+        std::fs::create_dir_all(&workspace_path)?;
 
         let custom_cmd = vec!["sh".to_string(), "-c".to_string(), "echo ok".to_string()];
         let builder =
             SandboxBuilder::new(&workspace_path, &repo_root, &custom_cmd).with_direnv(true);
-        let args = builder.build_args().expect("build_args");
+        let args = builder.build_args()?;
 
         expect_that!(
             &args[..],
             contains_subslice(&["--", "direnv", "exec", ".", "sh", "-c", "echo ok"])
         );
+        Ok(())
     }
 
     #[googletest::test]
-    fn build_command_sets_fence_program_and_workspace_cwd() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
+    fn build_command_sets_fence_program_and_workspace_cwd() -> TestResult {
+        let temp_dir = tempfile::tempdir()?;
         let repo_root = temp_dir.path().join("repo");
         let workspace_path = repo_root.join(".workspaces").join("ws");
-        std::fs::create_dir_all(&workspace_path).expect("create ws");
+        std::fs::create_dir_all(&workspace_path)?;
 
         let cmd_payload = vec!["agy".to_string()];
         let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd_payload);
-        let cmd = builder.build_command().expect("build_command");
+        let cmd = builder.build_command()?;
 
         expect_that!(cmd.get_program(), eq("fence"));
         expect_that!(cmd.get_current_dir(), some(eq(&workspace_path)));
+        Ok(())
     }
 
     #[googletest::test]
-    fn append_direnv_args_called_out_of_order_returns_error() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
+    fn append_direnv_args_called_out_of_order_returns_error() -> TestResult {
+        let temp_dir = tempfile::tempdir()?;
         let repo_root = temp_dir.path();
         let ws_path = repo_root.join("ws");
         let cmd_payload = vec!["echo".to_string()];
@@ -450,14 +461,15 @@ mod tests {
         cmd3.arg("--");
         let res3 = builder.append_direnv_args(&mut cmd3);
         expect_that!(res3, ok(anything()));
+        Ok(())
     }
 
     #[googletest::test]
-    fn display_trait_produces_readable_shell_string() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
+    fn display_trait_produces_readable_shell_string() -> TestResult {
+        let temp_dir = tempfile::tempdir()?;
         let repo_root = temp_dir.path().join("repo");
         let workspace_path = repo_root.join(".workspaces").join("ws");
-        std::fs::create_dir_all(&workspace_path).expect("create ws");
+        std::fs::create_dir_all(&workspace_path)?;
 
         let custom_cmd = vec!["sh".to_string(), "-c".to_string(), "echo hi".to_string()];
         let builder =
@@ -466,20 +478,20 @@ mod tests {
         let formatted = format!("{builder}");
         expect_that!(&formatted, eq("fence -- direnv exec . sh -c echo hi"));
         expect_that!(&builder.to_string(), eq(&formatted));
+        Ok(())
     }
 
     #[googletest::test]
-    fn for_workspace_configures_workspace_cwd_and_preserves_command() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
+    fn for_workspace_configures_workspace_cwd_and_preserves_command() -> TestResult {
+        let temp_dir = tempfile::tempdir()?;
         let repo_root = temp_dir.path();
         let output = std::process::Command::new("jj")
             .args(["--no-pager", "git", "init"])
             .arg(repo_root)
-            .output()
-            .expect("init jj repo");
-        assert!(output.status.success());
+            .output()?;
+        expect_that!(output.status.success(), is_true());
 
-        let ws = Workspace::new(repo_root, "builder-ws").expect("new workspace");
+        let ws = Workspace::new(repo_root, "builder-ws")?;
         let cmd_payload = vec![
             "agy".to_string(),
             "--dangerously-skip-permissions".to_string(),
@@ -487,12 +499,13 @@ mod tests {
         ];
         let builder = SandboxBuilder::for_workspace(&ws, &cmd_payload).with_direnv(true);
 
-        let cmd = builder.build_command().expect("build_command");
+        let cmd = builder.build_command()?;
         expect_that!(cmd.get_current_dir(), some(eq(ws.path())));
         let formatted = format!("{builder}");
         expect_that!(
             &formatted,
             contains_substring("direnv exec . agy --dangerously-skip-permissions --extra-flag")
         );
+        Ok(())
     }
 }

@@ -92,18 +92,18 @@ mod tests {
     }
 
     #[googletest::test]
-    fn init_project_config_creates_fence_jsonc_with_extends() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
+    fn init_project_config_creates_fence_jsonc_with_extends()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempfile::tempdir()?;
         let project_dir = temp_dir.path();
 
-        let created = ConfigInitializer::init_project_config(project_dir, false)
-            .expect("init_project_config");
+        let created = ConfigInitializer::init_project_config(project_dir, false)?;
         expect_that!(created, eq(&project_dir.join("fence.jsonc")));
 
         let fence_file = project_dir.join("fence.jsonc");
         expect_that!(fence_file.exists(), is_true());
 
-        let content = std::fs::read_to_string(&fence_file).expect("read fence.jsonc");
+        let content = std::fs::read_to_string(&fence_file)?;
         expect_that!(&content, contains_substring("fence.schema.json"));
         expect_that!(&content, contains_substring("\"extends\":"));
 
@@ -115,8 +115,8 @@ mod tests {
         );
 
         // Call with force returns Ok(path)
-        let forced =
-            ConfigInitializer::init_project_config(project_dir, true).expect("forced init");
+        let forced = ConfigInitializer::init_project_config(project_dir, true)?;
         expect_that!(forced, eq(&project_dir.join("fence.jsonc")));
+        Ok(())
     }
 }

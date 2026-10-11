@@ -159,9 +159,15 @@ mod tests {
     #[googletest::test]
     fn parse_json_status_allowed() {
         let json = br#"{"state":{"foundRC":{"allowed":0,"path":"/tmp/.envrc"}}}"#;
-        let parsed = DirenvCommand::parse_json_status(json).expect("parse json");
-        expect_that!(parsed.allowed, some(is_true()));
-        expect_that!(parsed.found_rc, some(eq(&PathBuf::from("/tmp/.envrc"))));
+        let parsed = DirenvCommand::parse_json_status(json);
+        expect_that!(
+            parsed,
+            some(matches_pattern!(DirenvStatusOutput {
+                allowed: some(is_true()),
+                found_rc: some(eq(&PathBuf::from("/tmp/.envrc"))),
+                ..
+            }))
+        );
     }
 
     #[googletest::test]

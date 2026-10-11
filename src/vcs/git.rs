@@ -183,38 +183,42 @@ mod tests {
         );
     }
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     #[googletest::test]
-    fn from_dir_at_repo_root_discovers_git_root() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn from_dir_at_repo_root_discovers_git_root() -> TestResult {
+        let dir = tempfile::tempdir()?;
         let repo_root = dir.path();
         init_test_git_repo(repo_root);
 
-        let git = Git::from_dir(repo_root).expect("from_dir");
+        let git = Git::from_dir(repo_root)?;
         let canonical_root = repo_root
             .canonicalize()
             .unwrap_or_else(|_| repo_root.to_path_buf());
         expect_that!(git.repo_root(), eq(&canonical_root));
+        Ok(())
     }
 
     #[googletest::test]
-    fn from_dir_in_deep_subdirectory_discovers_git_root() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn from_dir_in_deep_subdirectory_discovers_git_root() -> TestResult {
+        let dir = tempfile::tempdir()?;
         let repo_root = dir.path();
         init_test_git_repo(repo_root);
 
         let sub = repo_root.join("deep").join("nested");
-        std::fs::create_dir_all(&sub).expect("create deep dir");
+        std::fs::create_dir_all(&sub)?;
 
-        let git = Git::from_dir(&sub).expect("from_dir in sub");
+        let git = Git::from_dir(&sub)?;
         let canonical_root = repo_root
             .canonicalize()
             .unwrap_or_else(|_| repo_root.to_path_buf());
         expect_that!(git.repo_root(), eq(&canonical_root));
+        Ok(())
     }
 
     #[googletest::test]
-    fn from_dir_outside_repo_returns_not_in_git_repo() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn from_dir_outside_repo_returns_not_in_git_repo() -> TestResult {
+        let dir = tempfile::tempdir()?;
         let non_repo = dir.path();
 
         let res = Git::from_dir(non_repo);
@@ -222,82 +226,72 @@ mod tests {
             res,
             matches_pattern!(Err(matches_pattern!(WorkspaceError::NotInGitRepo)))
         );
+        Ok(())
     }
 
     #[googletest::test]
-    fn git_worktree_lifecycle_operations() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn git_worktree_lifecycle_operations() -> TestResult {
+        let dir = tempfile::tempdir()?;
         let repo_root = dir.path();
         init_test_git_repo(repo_root);
 
-        let git = Git::from_dir(repo_root).expect("from_dir");
+        let git = Git::from_dir(repo_root)?;
         let ws_name = "test-ws";
         let rel_ws_path = Path::new(".workspaces").join(ws_name);
         let abs_ws_path = git.repo_root().join(&rel_ws_path);
 
-        expect_that!(
-            git.is_workspace_registered(ws_name).expect("is_registered"),
-            is_false()
-        );
+        expect_that!(git.is_workspace_registered(ws_name)?, is_false());
         expect_that!(git.workspace_exists(&abs_ws_path), is_false());
 
-        std::fs::create_dir_all(git.repo_root().join(".workspaces")).expect("create .workspaces");
-        git.add_workspace(&rel_ws_path, ws_name)
-            .expect("add_workspace");
+        std::fs::create_dir_all(git.repo_root().join(".workspaces"))?;
+        git.add_workspace(&rel_ws_path, ws_name)?;
 
-        expect_that!(
-            git.is_workspace_registered(ws_name).expect("is_registered"),
-            is_true()
-        );
+        expect_that!(git.is_workspace_registered(ws_name)?, is_true());
         expect_that!(git.workspace_exists(&abs_ws_path), is_true());
 
-        git.forget_workspace(ws_name).expect("forget_workspace");
-        expect_that!(
-            git.is_workspace_registered(ws_name).expect("is_registered"),
-            is_false()
-        );
+        git.forget_workspace(ws_name)?;
+        expect_that!(git.is_workspace_registered(ws_name)?, is_false());
+        Ok(())
     }
 
     #[googletest::test]
-    fn re_adding_workspace_after_forget_succeeds() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn re_adding_workspace_after_forget_succeeds() -> TestResult {
+        let dir = tempfile::tempdir()?;
         let repo_root = dir.path();
         init_test_git_repo(repo_root);
 
-        let git = Git::from_dir(repo_root).expect("from_dir");
+        let git = Git::from_dir(repo_root)?;
         let ws_name = "readd-ws";
         let rel_ws_path = Path::new(".workspaces").join(ws_name);
-        std::fs::create_dir_all(git.repo_root().join(".workspaces")).expect("create .workspaces");
+        std::fs::create_dir_all(git.repo_root().join(".workspaces"))?;
 
-        git.add_workspace(&rel_ws_path, ws_name).expect("first add");
-        git.forget_workspace(ws_name).expect("forget");
+        git.add_workspace(&rel_ws_path, ws_name)?;
+        git.forget_workspace(ws_name)?;
 
         // Re-adding the worktree with the same name must succeed
         let second_add = git.add_workspace(&rel_ws_path, ws_name);
         expect_that!(second_add, ok(anything()));
-        expect_that!(
-            git.is_workspace_registered(ws_name).expect("is_registered"),
-            is_true()
-        );
+        expect_that!(git.is_workspace_registered(ws_name)?, is_true());
+        Ok(())
     }
 
     #[googletest::test]
-    fn git_list_workspaces_lists_added_worktrees() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn git_list_workspaces_lists_added_worktrees() -> TestResult {
+        let dir = tempfile::tempdir()?;
         let repo_root = dir.path();
         init_test_git_repo(repo_root);
 
-        let git = Git::from_dir(repo_root).expect("from_dir");
-        let initial = git.list_workspaces().expect("list initial");
+        let git = Git::from_dir(repo_root)?;
+        let initial = git.list_workspaces()?;
         expect_that!(initial, is_empty());
 
         let rel1 = Path::new(".workspaces").join("git-ws-1");
         let rel2 = Path::new(".workspaces").join("git-ws-2");
-        std::fs::create_dir_all(git.repo_root().join(".workspaces")).expect("create .workspaces");
-        git.add_workspace(&rel1, "git-ws-1").expect("add git-ws-1");
-        git.add_workspace(&rel2, "git-ws-2").expect("add git-ws-2");
+        std::fs::create_dir_all(git.repo_root().join(".workspaces"))?;
+        git.add_workspace(&rel1, "git-ws-1")?;
+        git.add_workspace(&rel2, "git-ws-2")?;
 
-        let listed = git.list_workspaces().expect("list after adding");
+        let listed = git.list_workspaces()?;
         expect_that!(
             listed,
             unordered_elements_are![eq("git-ws-1"), eq("git-ws-2")]
@@ -305,17 +299,18 @@ mod tests {
 
         // When inside a worktree, Git::from_dir still resolves to the main repo root
         let ws1_path = git.repo_root().join(&rel1);
-        let git_from_ws = Git::from_dir(&ws1_path).expect("from_dir inside ws");
+        let git_from_ws = Git::from_dir(&ws1_path)?;
         expect_that!(git_from_ws.repo_root(), eq(git.repo_root()));
-        let listed_from_ws = git_from_ws.list_workspaces().expect("list from ws");
+        let listed_from_ws = git_from_ws.list_workspaces()?;
         expect_that!(
             listed_from_ws,
             unordered_elements_are![eq("git-ws-1"), eq("git-ws-2")]
         );
 
         // After forgetting git-ws-1, only git-ws-2 remains
-        git.forget_workspace("git-ws-1").expect("forget ws-1");
-        let listed_after_forget = git.list_workspaces().expect("list after forget");
+        git.forget_workspace("git-ws-1")?;
+        let listed_after_forget = git.list_workspaces()?;
         expect_that!(listed_after_forget, elements_are![eq("git-ws-2")]);
+        Ok(())
     }
 }

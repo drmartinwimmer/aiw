@@ -208,43 +208,47 @@ mod tests {
         );
     }
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     #[googletest::test]
-    fn vcs_from_path_in_jj_repo_identifies_jj() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn vcs_from_path_in_jj_repo_identifies_jj() -> TestResult {
+        let dir = tempfile::tempdir()?;
         let repo_root = dir.path();
         init_test_jj_repo(repo_root);
 
-        let vcs = Vcs::from_path(repo_root).expect("from_path");
+        let vcs = Vcs::from_path(repo_root)?;
         expect_that!(vcs.repo_root(), eq(repo_root));
         expect_that!(matches!(vcs.kind, VcsKind::Jj(_)), is_true());
+        Ok(())
     }
 
     #[googletest::test]
-    fn vcs_from_path_in_git_repo_identifies_git() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn vcs_from_path_in_git_repo_identifies_git() -> TestResult {
+        let dir = tempfile::tempdir()?;
         let repo_root = dir.path();
         init_test_git_repo(repo_root);
 
-        let vcs = Vcs::from_path(repo_root).expect("from_path");
+        let vcs = Vcs::from_path(repo_root)?;
         let canonical_root = repo_root
             .canonicalize()
             .unwrap_or_else(|_| repo_root.to_path_buf());
         expect_that!(vcs.repo_root(), eq(&canonical_root));
         expect_that!(matches!(vcs.kind, VcsKind::Git(_)), is_true());
+        Ok(())
     }
 
     #[googletest::test]
-    fn nested_git_repo_inside_jj_repo_is_identified_as_git() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn nested_git_repo_inside_jj_repo_is_identified_as_git() -> TestResult {
+        let dir = tempfile::tempdir()?;
         let outer_jj = dir.path();
         init_test_jj_repo(outer_jj);
 
         let nested_git = outer_jj.join("sub_git_repo");
-        std::fs::create_dir_all(&nested_git).expect("create nested git dir");
+        std::fs::create_dir_all(&nested_git)?;
         init_test_git_repo(&nested_git);
 
         // Inside the nested git repo root:
-        let vcs_nested = Vcs::from_path(&nested_git).expect("Vcs inside nested git");
+        let vcs_nested = Vcs::from_path(&nested_git)?;
         let canonical_nested = nested_git
             .canonicalize()
             .unwrap_or_else(|_| nested_git.clone());
@@ -253,44 +257,46 @@ mod tests {
 
         // In a deep subdirectory of the nested git repo:
         let deep_sub = nested_git.join("src").join("module");
-        std::fs::create_dir_all(&deep_sub).expect("create deep sub");
-        let vcs_deep = Vcs::from_path(&deep_sub).expect("Vcs inside deep sub of nested git");
+        std::fs::create_dir_all(&deep_sub)?;
+        let vcs_deep = Vcs::from_path(&deep_sub)?;
         expect_that!(matches!(vcs_deep.kind, VcsKind::Git(_)), is_true());
         expect_that!(vcs_deep.repo_root(), eq(&canonical_nested));
 
         // Outside in the outer JJ repo:
-        let vcs_outer = Vcs::from_path(outer_jj).expect("Vcs inside outer jj");
+        let vcs_outer = Vcs::from_path(outer_jj)?;
         expect_that!(matches!(vcs_outer.kind, VcsKind::Jj(_)), is_true());
         expect_that!(vcs_outer.repo_root(), eq(outer_jj));
+        Ok(())
     }
 
     #[googletest::test]
-    fn nested_jj_repo_inside_git_repo_is_identified_as_jj() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn nested_jj_repo_inside_git_repo_is_identified_as_jj() -> TestResult {
+        let dir = tempfile::tempdir()?;
         let outer_git = dir.path();
         init_test_git_repo(outer_git);
 
         let nested_jj = outer_git.join("sub_jj_repo");
-        std::fs::create_dir_all(&nested_jj).expect("create nested jj dir");
+        std::fs::create_dir_all(&nested_jj)?;
         init_test_jj_repo(&nested_jj);
 
         // Inside the nested JJ repo:
-        let vcs_nested = Vcs::from_path(&nested_jj).expect("Vcs inside nested jj");
+        let vcs_nested = Vcs::from_path(&nested_jj)?;
         expect_that!(matches!(vcs_nested.kind, VcsKind::Jj(_)), is_true());
         expect_that!(vcs_nested.repo_root(), eq(&nested_jj));
 
         // Outside in the outer Git repo:
-        let vcs_outer = Vcs::from_path(outer_git).expect("Vcs inside outer git");
+        let vcs_outer = Vcs::from_path(outer_git)?;
         let canonical_outer = outer_git
             .canonicalize()
             .unwrap_or_else(|_| outer_git.to_path_buf());
         expect_that!(matches!(vcs_outer.kind, VcsKind::Git(_)), is_true());
         expect_that!(vcs_outer.repo_root(), eq(&canonical_outer));
+        Ok(())
     }
 
     #[googletest::test]
-    fn vcs_outside_repo_returns_not_in_repo() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn vcs_outside_repo_returns_not_in_repo() -> TestResult {
+        let dir = tempfile::tempdir()?;
         let non_repo = dir.path();
 
         let res = Vcs::from_path(non_repo);
@@ -298,5 +304,6 @@ mod tests {
             res,
             matches_pattern!(Err(matches_pattern!(WorkspaceError::NotInRepo)))
         );
+        Ok(())
     }
 }

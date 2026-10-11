@@ -324,9 +324,11 @@ mod tests {
     use super::*;
     use googletest::prelude::*;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     #[googletest::test]
-    fn parse_agy_subcommand_minimal_succeeds() {
-        let cli = Cli::try_parse_from(["aiw", "agy", "my-workspace"]).expect("parse minimal agy");
+    fn parse_agy_subcommand_minimal_succeeds() -> TestResult {
+        let cli = Cli::try_parse_from(["aiw", "agy", "my-workspace"])?;
         if let Commands::Agy(cmd) = cli.command {
             expect_that!(&cmd.workspace_name, eq("my-workspace"));
             expect_that!(cmd.dry_run, is_false());
@@ -334,12 +336,12 @@ mod tests {
         } else {
             expect_that!(false, is_true());
         }
+        Ok(())
     }
 
     #[googletest::test]
-    fn parse_agy_subcommand_with_dry_run_flag_succeeds() {
-        let cli = Cli::try_parse_from(["aiw", "agy", "my-workspace", "--dry-run"])
-            .expect("parse agy with dry run");
+    fn parse_agy_subcommand_with_dry_run_flag_succeeds() -> TestResult {
+        let cli = Cli::try_parse_from(["aiw", "agy", "my-workspace", "--dry-run"])?;
         if let Commands::Agy(cmd) = cli.command {
             expect_that!(&cmd.workspace_name, eq("my-workspace"));
             expect_that!(cmd.dry_run, is_true());
@@ -347,10 +349,11 @@ mod tests {
         } else {
             expect_that!(false, is_true());
         }
+        Ok(())
     }
 
     #[googletest::test]
-    fn parse_agy_subcommand_with_dry_run_and_extra_args_succeeds() {
+    fn parse_agy_subcommand_with_dry_run_and_extra_args_succeeds() -> TestResult {
         let cli = Cli::try_parse_from([
             "aiw",
             "agy",
@@ -359,8 +362,7 @@ mod tests {
             "--",
             "--model",
             "gemini-2.5",
-        ])
-        .expect("parse agy with extra args");
+        ])?;
         if let Commands::Agy(cmd) = cli.command {
             expect_that!(&cmd.workspace_name, eq("feature-1"));
             expect_that!(cmd.dry_run, is_true());
@@ -371,6 +373,7 @@ mod tests {
         } else {
             expect_that!(false, is_true());
         }
+        Ok(())
     }
 
     #[googletest::test]
@@ -396,13 +399,14 @@ mod tests {
     }
 
     #[googletest::test]
-    fn parse_forget_subcommand_succeeds() {
-        let cli = Cli::try_parse_from(["aiw", "forget", "old-ws"]).expect("parse forget");
+    fn parse_forget_subcommand_succeeds() -> TestResult {
+        let cli = Cli::try_parse_from(["aiw", "forget", "old-ws"])?;
         if let Commands::Forget(cmd) = cli.command {
             expect_that!(&cmd.workspace_name, eq("old-ws"));
         } else {
             expect_that!(false, is_true());
         }
+        Ok(())
     }
 
     #[googletest::test]
@@ -417,8 +421,8 @@ mod tests {
     }
 
     #[googletest::test]
-    fn parse_config_init_default_succeeds() {
-        let cli = Cli::try_parse_from(["aiw", "config", "init"]).expect("parse config init");
+    fn parse_config_init_default_succeeds() -> TestResult {
+        let cli = Cli::try_parse_from(["aiw", "config", "init"])?;
         if let Commands::Config(cmd) = cli.command {
             let ConfigSubcommands::Init(args) = cmd.command;
             expect_that!(args.force, is_false());
@@ -426,12 +430,12 @@ mod tests {
         } else {
             expect_that!(false, is_true());
         }
+        Ok(())
     }
 
     #[googletest::test]
-    fn parse_config_init_user_subcommand_succeeds() {
-        let cli =
-            Cli::try_parse_from(["aiw", "config", "init", "user"]).expect("parse config init user");
+    fn parse_config_init_user_subcommand_succeeds() -> TestResult {
+        let cli = Cli::try_parse_from(["aiw", "config", "init", "user"])?;
         if let Commands::Config(cmd) = cli.command {
             let ConfigSubcommands::Init(args) = cmd.command;
             expect_that!(args.force, is_false());
@@ -444,12 +448,12 @@ mod tests {
         } else {
             expect_that!(false, is_true());
         }
+        Ok(())
     }
 
     #[googletest::test]
-    fn parse_config_init_project_with_force_succeeds() {
-        let cli = Cli::try_parse_from(["aiw", "config", "init", "--force", "project"])
-            .expect("parse config init project with force");
+    fn parse_config_init_project_with_force_succeeds() -> TestResult {
+        let cli = Cli::try_parse_from(["aiw", "config", "init", "--force", "project"])?;
         if let Commands::Config(cmd) = cli.command {
             let ConfigSubcommands::Init(args) = cmd.command;
             expect_that!(args.force, is_true());
@@ -462,12 +466,12 @@ mod tests {
         } else {
             expect_that!(false, is_true());
         }
+        Ok(())
     }
 
     #[googletest::test]
-    fn parse_config_init_project_subcommand_with_own_force_succeeds() {
-        let cli = Cli::try_parse_from(["aiw", "config", "init", "project", "-f"])
-            .expect("parse config init project with own force");
+    fn parse_config_init_project_subcommand_with_own_force_succeeds() -> TestResult {
+        let cli = Cli::try_parse_from(["aiw", "config", "init", "project", "-f"])?;
         if let Commands::Config(cmd) = cli.command {
             let ConfigSubcommands::Init(args) = cmd.command;
             expect_that!(
@@ -479,22 +483,25 @@ mod tests {
         } else {
             expect_that!(false, is_true());
         }
+        Ok(())
     }
 
     #[googletest::test]
-    fn parse_list_subcommand_succeeds() {
-        let cli = Cli::try_parse_from(["aiw", "list"]).expect("parse list");
+    fn parse_list_subcommand_succeeds() -> TestResult {
+        let cli = Cli::try_parse_from(["aiw", "list"])?;
         expect_that!(&cli.command, eq(&Commands::List(ListCommand {})));
+        Ok(())
     }
 
     #[googletest::test]
-    fn parse_list_subcommand_alias_ls_succeeds() {
-        let cli = Cli::try_parse_from(["aiw", "ls"]).expect("parse ls");
+    fn parse_list_subcommand_alias_ls_succeeds() -> TestResult {
+        let cli = Cli::try_parse_from(["aiw", "ls"])?;
         expect_that!(&cli.command, eq(&Commands::List(ListCommand {})));
+        Ok(())
     }
 
     #[googletest::test]
-    fn parse_completion_subcommand_succeeds_for_all_shells() {
+    fn parse_completion_subcommand_succeeds_for_all_shells() -> TestResult {
         let shells = [
             ("bash", ShellChoice::Bash),
             ("elvish", ShellChoice::Elvish),
@@ -503,23 +510,24 @@ mod tests {
             ("zsh", ShellChoice::Zsh),
         ];
         for (name, expected) in shells {
-            let cli = Cli::try_parse_from(["aiw", "completion", name]).expect("parse completion");
+            let cli = Cli::try_parse_from(["aiw", "completion", name])?;
             expect_that!(
                 &cli.command,
                 eq(&Commands::Completion(CompletionCommand { shell: expected }))
             );
         }
+        Ok(())
     }
 
     #[googletest::test]
     fn parse_completion_without_shell_fails() {
         let cli = Cli::try_parse_from(["aiw", "completion"]);
-        expect_that!(cli.is_err(), is_true());
+        expect_that!(cli, err(anything()));
     }
 
     #[googletest::test]
     fn parse_completion_invalid_shell_fails() {
         let cli = Cli::try_parse_from(["aiw", "completion", "invalid_shell"]);
-        expect_that!(cli.is_err(), is_true());
+        expect_that!(cli, err(anything()));
     }
 }

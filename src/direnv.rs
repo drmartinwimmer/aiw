@@ -77,63 +77,65 @@ mod tests {
     use super::*;
     use googletest::prelude::*;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     #[googletest::test]
-    fn has_envrc_detects_envrc_and_env() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
+    fn has_envrc_detects_envrc_and_env() -> TestResult {
+        let temp_dir = tempfile::tempdir()?;
         let path = temp_dir.path();
         expect_that!(Direnv::has_envrc(path), is_false());
 
-        std::fs::write(path.join(".env"), "A=1\n").expect("write .env");
+        std::fs::write(path.join(".env"), "A=1\n")?;
         expect_that!(Direnv::has_envrc(path), is_true());
 
-        std::fs::remove_file(path.join(".env")).expect("remove .env");
-        std::fs::write(path.join(".envrc"), "export A=1\n").expect("write .envrc");
+        std::fs::remove_file(path.join(".env"))?;
+        std::fs::write(path.join(".envrc"), "export A=1\n")?;
         expect_that!(Direnv::has_envrc(path), is_true());
+        Ok(())
     }
 
     #[googletest::test]
-    fn is_direnv_allowed_returns_false_for_directory_without_envrc() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
+    fn is_direnv_allowed_returns_false_for_directory_without_envrc() -> TestResult {
+        let temp_dir = tempfile::tempdir()?;
         expect_that!(Direnv::is_dir_allowed(temp_dir.path()), is_false());
+        Ok(())
     }
 
     #[googletest::test]
-    fn is_direnv_allowed_checks_authorization_status() {
+    fn is_direnv_allowed_checks_authorization_status() -> TestResult {
         if which::which("direnv").is_err() {
-            return;
+            return Ok(());
         }
-        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let temp_dir = tempfile::tempdir()?;
         let envrc = temp_dir.path().join(".envrc");
-        std::fs::write(&envrc, "export TEST_VAR=1\n").expect("write .envrc");
+        std::fs::write(&envrc, "export TEST_VAR=1\n")?;
 
         // Before allow, should be false
         expect_that!(Direnv::is_dir_allowed(temp_dir.path()), is_false());
 
         // Allow it
-        DirenvCommand::new()
-            .current_dir(temp_dir.path())
-            .allow()
-            .expect("direnv allow");
+        DirenvCommand::new().current_dir(temp_dir.path()).allow()?;
 
         // After allow, should be true
         expect_that!(Direnv::is_dir_allowed(temp_dir.path()), is_true());
+        Ok(())
     }
 
     #[googletest::test]
-    fn direnv_struct_encapsulates_state_and_allows_workspace() {
+    fn direnv_struct_encapsulates_state_and_allows_workspace() -> TestResult {
         if which::which("direnv").is_err() {
-            return;
+            return Ok(());
         }
-        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let temp_dir = tempfile::tempdir()?;
         let repo_root = temp_dir.path().join("repo");
         let ws_dir = temp_dir.path().join("ws");
-        std::fs::create_dir_all(&repo_root).expect("create repo");
-        std::fs::create_dir_all(&ws_dir).expect("create ws");
+        std::fs::create_dir_all(&repo_root)?;
+        std::fs::create_dir_all(&ws_dir)?;
 
         let repo_envrc = repo_root.join(".envrc");
-        std::fs::write(&repo_envrc, "export R=1\n").expect("write repo .envrc");
+        std::fs::write(&repo_envrc, "export R=1\n")?;
         let ws_envrc = ws_dir.join(".envrc");
-        std::fs::write(&ws_envrc, "export W=1\n").expect("write ws .envrc");
+        std::fs::write(&ws_envrc, "export W=1\n")?;
 
         // When repo is unallowed:
         let unallowed_direnv = Direnv::new(&repo_root);
@@ -142,15 +144,13 @@ mod tests {
         expect_that!(Direnv::is_dir_allowed(&ws_dir), is_false());
 
         // Allow repo:
-        DirenvCommand::new()
-            .current_dir(&repo_root)
-            .allow()
-            .expect("allow repo");
+        DirenvCommand::new().current_dir(&repo_root).allow()?;
 
         // When repo is allowed:
         let allowed_direnv = Direnv::new(&repo_root);
         expect_that!(allowed_direnv.is_allowed(), is_true());
         allowed_direnv.allow_workspace(&ws_dir);
         expect_that!(Direnv::is_dir_allowed(&ws_dir), is_true());
+        Ok(())
     }
 }

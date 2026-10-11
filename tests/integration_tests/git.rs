@@ -2,9 +2,11 @@ use super::common::{init_test_git_repo, init_test_jj_repo, run_aiw, write_test_f
 use googletest::prelude::*;
 use std::process::Command;
 
+type TestResult = Result<(), Box<dyn std::error::Error>>;
+
 #[googletest::test]
-fn workspace_creation_and_dry_run_in_real_git_repo_succeeds() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn workspace_creation_and_dry_run_in_real_git_repo_succeeds() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let repo_root = temp_dir.path();
     init_test_git_repo(repo_root);
     write_test_fence_json(repo_root);
@@ -28,19 +30,19 @@ fn workspace_creation_and_dry_run_in_real_git_repo_succeeds() {
     let wt_list = Command::new("git")
         .args(["--no-pager", "worktree", "list", "--porcelain"])
         .current_dir(repo_root)
-        .output()
-        .expect("git worktree list");
+        .output()?;
     expect_that!(wt_list.status.success(), is_true());
     let list_stdout = String::from_utf8_lossy(&wt_list.stdout);
     expect_that!(
         list_stdout.as_ref(),
         contains_substring("test-git-workspace")
     );
+    Ok(())
 }
 
 #[googletest::test]
-fn idempotent_workspace_reuse_in_real_git_repo_succeeds() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn idempotent_workspace_reuse_in_real_git_repo_succeeds() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let repo_root = temp_dir.path();
     init_test_git_repo(repo_root);
     write_test_fence_json(repo_root);
@@ -58,19 +60,19 @@ fn idempotent_workspace_reuse_in_real_git_repo_succeeds() {
     let wt_list = Command::new("git")
         .args(["--no-pager", "worktree", "list", "--porcelain"])
         .current_dir(repo_root)
-        .output()
-        .expect("git worktree list");
+        .output()?;
     expect_that!(wt_list.status.success(), is_true());
     let list_stdout = String::from_utf8_lossy(&wt_list.stdout);
     expect_that!(
         list_stdout.as_ref(),
         contains_substring("reused-git-workspace")
     );
+    Ok(())
 }
 
 #[googletest::test]
-fn forget_subcommand_removes_workspace_from_git_worktree_list() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn forget_subcommand_removes_workspace_from_git_worktree_list() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let repo_root = temp_dir.path();
     init_test_git_repo(repo_root);
     write_test_fence_json(repo_root);
@@ -84,8 +86,7 @@ fn forget_subcommand_removes_workspace_from_git_worktree_list() {
     let list_before = Command::new("git")
         .args(["--no-pager", "worktree", "list", "--porcelain"])
         .current_dir(repo_root)
-        .output()
-        .expect("git worktree list");
+        .output()?;
     expect_that!(
         String::from_utf8_lossy(&list_before.stdout).as_ref(),
         contains_substring("ws-to-forget-git")
@@ -97,24 +98,24 @@ fn forget_subcommand_removes_workspace_from_git_worktree_list() {
     let list_after = Command::new("git")
         .args(["--no-pager", "worktree", "list", "--porcelain"])
         .current_dir(repo_root)
-        .output()
-        .expect("git worktree list");
+        .output()?;
     expect_that!(
         String::from_utf8_lossy(&list_after.stdout).as_ref(),
         not(contains_substring("ws-to-forget-git"))
     );
     expect_that!(ws_path.exists(), is_false());
+    Ok(())
 }
 
 #[googletest::test]
-fn git_repo_in_subdirectory_discovers_root_and_creates_workspace() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn git_repo_in_subdirectory_discovers_root_and_creates_workspace() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let repo_root = temp_dir.path();
     init_test_git_repo(repo_root);
     write_test_fence_json(repo_root);
 
     let sub = repo_root.join("deep").join("nested");
-    std::fs::create_dir_all(&sub).expect("create deep sub");
+    std::fs::create_dir_all(&sub)?;
 
     let output = run_aiw(&sub, &["agy", "from-sub-git", "--dry-run"]);
     expect_that!(output.status.success(), is_true());
@@ -122,16 +123,17 @@ fn git_repo_in_subdirectory_discovers_root_and_creates_workspace() {
     let ws_path = repo_root.join(".workspaces").join("from-sub-git");
     expect_that!(ws_path.exists(), is_true());
     expect_that!(ws_path.join(".git").exists(), is_true());
+    Ok(())
 }
 
 #[googletest::test]
-fn git_repo_nested_inside_jj_repo_identifies_git_root_and_creates_git_workspace() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn git_repo_nested_inside_jj_repo_identifies_git_root_and_creates_git_workspace() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let outer_jj = temp_dir.path();
     init_test_jj_repo(outer_jj);
 
     let nested_git = outer_jj.join("sub_git_project");
-    std::fs::create_dir_all(&nested_git).expect("create nested git project directory");
+    std::fs::create_dir_all(&nested_git)?;
     init_test_git_repo(&nested_git);
     write_test_fence_json(&nested_git);
 
@@ -150,15 +152,14 @@ fn git_repo_nested_inside_jj_repo_identifies_git_root_and_creates_git_workspace(
     let wt_list = Command::new("git")
         .args(["--no-pager", "worktree", "list", "--porcelain"])
         .current_dir(&nested_git)
-        .output()
-        .expect("git worktree list in nested git");
+        .output()?;
     expect_that!(wt_list.status.success(), is_true());
     let list_stdout = String::from_utf8_lossy(&wt_list.stdout);
     expect_that!(list_stdout.as_ref(), contains_substring("nested-git-ws"));
 
     // 2. Also run aiw from a deeper subdirectory within the nested git repo
     let deep_nested = nested_git.join("src").join("components");
-    std::fs::create_dir_all(&deep_nested).expect("create deep nested directory");
+    std::fs::create_dir_all(&deep_nested)?;
     let deep_out = run_aiw(&deep_nested, &["agy", "from-deep-sub", "--dry-run"]);
     expect_that!(deep_out.status.success(), is_true());
 
@@ -166,11 +167,12 @@ fn git_repo_nested_inside_jj_repo_identifies_git_root_and_creates_git_workspace(
     expect_that!(deep_ws.exists(), is_true());
     expect_that!(deep_ws.join(".git").exists(), is_true());
     expect_that!(outer_jj.join(".workspaces").exists(), is_false());
+    Ok(())
 }
 
 #[googletest::test]
-fn list_subcommand_in_git_repo_lists_all_workspaces() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn list_subcommand_in_git_repo_lists_all_workspaces() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let repo_root = temp_dir.path();
     init_test_git_repo(repo_root);
     write_test_fence_json(repo_root);
@@ -222,4 +224,5 @@ fn list_subcommand_in_git_repo_lists_all_workspaces() {
         String::from_utf8_lossy(&out_after_forget.stdout).as_ref(),
         eq("git-two\n")
     );
+    Ok(())
 }

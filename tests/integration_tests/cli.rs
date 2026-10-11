@@ -4,36 +4,37 @@ use super::common::{
 use googletest::prelude::*;
 use std::process::Command;
 
+type TestResult = Result<(), Box<dyn std::error::Error>>;
+
 #[googletest::test]
-fn workspace_without_fence_json_defaults_to_shared_template() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn workspace_without_fence_json_defaults_to_shared_template() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let repo_root = temp_dir.path().join("repo");
     init_test_jj_repo(&repo_root);
 
     // Setup mock XDG_CONFIG_HOME
     let mock_config = temp_dir.path().join("config");
     let aiw_dir = mock_config.join("aiw");
-    std::fs::create_dir_all(&aiw_dir).expect("create aiw dir");
-    std::fs::write(aiw_dir.join("fence.jsonc"), r#"{"extends": "code"}"#)
-        .expect("write fence.jsonc");
+    std::fs::create_dir_all(&aiw_dir)?;
+    std::fs::write(aiw_dir.join("fence.jsonc"), r#"{"extends": "code"}"#)?;
 
     let output = Command::new(env!("CARGO_BIN_EXE_aiw"))
         .args(["agy", "auto-ws", "--dry-run"])
         .current_dir(&repo_root)
         .env("XDG_CONFIG_HOME", &mock_config)
-        .output()
-        .expect("run aiw");
+        .output()?;
 
     expect_that!(output.status.success(), is_true());
     let stdout = String::from_utf8_lossy(&output.stdout);
     let expected_tpl = aiw_dir.join("fence.jsonc").to_string_lossy().to_string();
     let expected_arg = format!("--settings {expected_tpl}");
     expect_that!(stdout.as_ref(), contains_substring(expected_arg.as_ref()));
+    Ok(())
 }
 
 #[googletest::test]
-fn aiw_config_init_defaults_to_project_and_user_subcommand_inits_user() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn aiw_config_init_defaults_to_project_and_user_subcommand_inits_user() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let repo_root = temp_dir.path().join("repo");
     init_test_jj_repo(&repo_root);
 
@@ -46,8 +47,7 @@ fn aiw_config_init_defaults_to_project_and_user_subcommand_inits_user() {
         .args(["config", "init"])
         .current_dir(&repo_root)
         .env("XDG_CONFIG_HOME", &mock_config)
-        .output()
-        .expect("run aiw config init");
+        .output()?;
 
     expect_that!(output1.status.success(), is_true());
     let stdout1 = String::from_utf8_lossy(&output1.stdout);
@@ -62,8 +62,7 @@ fn aiw_config_init_defaults_to_project_and_user_subcommand_inits_user() {
         .args(["config", "init"])
         .current_dir(&repo_root)
         .env("XDG_CONFIG_HOME", &mock_config)
-        .output()
-        .expect("run aiw config init again");
+        .output()?;
 
     expect_that!(output2.status.success(), is_true());
     let stdout2 = String::from_utf8_lossy(&output2.stdout);
@@ -80,8 +79,7 @@ fn aiw_config_init_defaults_to_project_and_user_subcommand_inits_user() {
         .args(["config", "init", "user"])
         .current_dir(&repo_root)
         .env("XDG_CONFIG_HOME", &mock_config)
-        .output()
-        .expect("run aiw config init user");
+        .output()?;
 
     expect_that!(output_user.status.success(), is_true());
     let stdout_user = String::from_utf8_lossy(&output_user.stdout);
@@ -95,8 +93,7 @@ fn aiw_config_init_defaults_to_project_and_user_subcommand_inits_user() {
         .args(["config", "init", "user"])
         .current_dir(&repo_root)
         .env("XDG_CONFIG_HOME", &mock_config)
-        .output()
-        .expect("run aiw config init user again");
+        .output()?;
 
     expect_that!(output_user2.status.success(), is_true());
     let stdout_user2 = String::from_utf8_lossy(&output_user2.stdout);
@@ -116,8 +113,7 @@ fn aiw_config_init_defaults_to_project_and_user_subcommand_inits_user() {
         .args(["config", "init", "--force", "project"])
         .current_dir(&repo_root)
         .env("XDG_CONFIG_HOME", &mock_config)
-        .output()
-        .expect("run aiw config init with force");
+        .output()?;
 
     expect_that!(output3.status.success(), is_true());
     let stdout3 = String::from_utf8_lossy(&output3.stdout);
@@ -125,11 +121,12 @@ fn aiw_config_init_defaults_to_project_and_user_subcommand_inits_user() {
     expect_that!(stdout3.as_ref(), eq(""));
     expect_that!(stderr3.as_ref(), eq(""));
     expect_that!(project_config.exists(), is_true());
+    Ok(())
 }
 
 #[googletest::test]
-fn list_subcommand_outside_repo_fails() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn list_subcommand_outside_repo_fails() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let non_repo = temp_dir.path();
 
     let output = run_aiw(non_repo, &["list"]);
@@ -139,21 +136,23 @@ fn list_subcommand_outside_repo_fails() {
         stderr.as_ref(),
         contains_substring("Error: Not inside a Jujutsu or Git repository")
     );
+    Ok(())
 }
 
 #[googletest::test]
-fn completion_subcommand_outputs_bash_script() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn completion_subcommand_outputs_bash_script() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let output = run_aiw(temp_dir.path(), &["completion", "bash"]);
     expect_that!(output.status.success(), is_true());
     let stdout = String::from_utf8_lossy(&output.stdout);
     expect_that!(stdout.as_ref(), contains_substring("_clap_complete_aiw"));
     expect_that!(stdout.as_ref(), contains_substring("complete -o nospace"));
+    Ok(())
 }
 
 #[googletest::test]
-fn completion_subcommand_outputs_zsh_script() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn completion_subcommand_outputs_zsh_script() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let output = run_aiw(temp_dir.path(), &["completion", "zsh"]);
     expect_that!(output.status.success(), is_true());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -162,21 +161,23 @@ fn completion_subcommand_outputs_zsh_script() {
         contains_substring("_clap_dynamic_completer_aiw")
     );
     expect_that!(stdout.as_ref(), contains_substring("compdef"));
+    Ok(())
 }
 
 #[googletest::test]
-fn completion_subcommand_outputs_fish_script() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn completion_subcommand_outputs_fish_script() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let output = run_aiw(temp_dir.path(), &["completion", "fish"]);
     expect_that!(output.status.success(), is_true());
     let stdout = String::from_utf8_lossy(&output.stdout);
     expect_that!(stdout.as_ref(), contains_substring("complete"));
     expect_that!(stdout.as_ref(), contains_substring("--command aiw"));
+    Ok(())
 }
 
 #[googletest::test]
-fn dynamic_completion_for_forget_in_jj_repo_completes_workspaces() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn dynamic_completion_for_forget_in_jj_repo_completes_workspaces() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let repo_root = temp_dir.path();
     init_test_jj_repo(repo_root);
     write_test_fence_json(repo_root);
@@ -208,11 +209,12 @@ fn dynamic_completion_for_forget_in_jj_repo_completes_workspaces() {
     let prefix_stdout = String::from_utf8_lossy(&prefix_output.stdout);
     expect_that!(prefix_stdout.as_ref(), contains_substring("ws-alpha"));
     expect_that!(prefix_stdout.as_ref(), not(contains_substring("ws-beta")));
+    Ok(())
 }
 
 #[googletest::test]
-fn dynamic_completion_for_agy_in_git_repo_completes_workspaces() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn dynamic_completion_for_agy_in_git_repo_completes_workspaces() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let repo_root = temp_dir.path();
     init_test_git_repo(repo_root);
     write_test_fence_json(repo_root);
@@ -234,11 +236,12 @@ fn dynamic_completion_for_agy_in_git_repo_completes_workspaces() {
     expect_that!(stdout.as_ref(), contains_substring("git-feat1\n"));
     expect_that!(stdout.as_ref(), contains_substring("git-feat2\n"));
     expect_that!(stdout.as_ref(), contains_substring("--dry-run\n"));
+    Ok(())
 }
 
 #[googletest::test]
-fn dynamic_completion_outside_repo_succeeds_gracefully() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
+fn dynamic_completion_outside_repo_succeeds_gracefully() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
     let non_repo = temp_dir.path();
 
     let comp_output = run_aiw_with_env(
@@ -247,4 +250,5 @@ fn dynamic_completion_outside_repo_succeeds_gracefully() {
         &["--", "aiw", "forget", ""],
     );
     expect_that!(comp_output.status.success(), is_true());
+    Ok(())
 }
