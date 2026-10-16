@@ -137,14 +137,7 @@ impl<'a> SandboxBuilder<'a> {
             }
 
             // 2. System / package data directories ($XDG_DATA_DIRS/.../aiw/fence.jsonc)
-            if let Ok(data_dirs) = std::env::var("XDG_DATA_DIRS") {
-                for data_dir in data_dirs.split(':').filter(|s| !s.is_empty()) {
-                    candidates.push(Path::new(data_dir).join("aiw").join("fence.jsonc"));
-                }
-            }
-
-            candidates.push(PathBuf::from("/usr/local/share/aiw/fence.jsonc"));
-            candidates.push(PathBuf::from("/usr/share/aiw/fence.jsonc"));
+            candidates.extend(ConfigInitializer::system_template_paths());
 
             candidates
         }
