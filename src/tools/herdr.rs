@@ -383,10 +383,8 @@ impl Herdr {
         cwd: Option<&Path>,
     ) -> Result<(), HerdrError> {
         if self.is_current_tab_named(workspace_name) {
-            if let Some(pane_id) = self.pane_id()
-                && let Err(err) = self.inform_agent(pane_id, agent)
-            {
-                eprintln!("Warning: failed to inform Herdr about agent: {err}");
+            if let Some(pane_id) = self.pane_id() {
+                self.inform_agent(pane_id, agent)?;
             }
             self.execute_in_place(command, cwd)
         } else {
