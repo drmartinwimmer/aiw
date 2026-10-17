@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0](https://github.com/drmartinwimmer/aiw/compare/ai-workspace-v0.4.0...ai-workspace-v0.5.0) (2026-10-17)
+
+
+### Features
+
+* close newly created Herdr tab pane when agent exits ([#30](https://github.com/drmartinwimmer/aiw/issues/30)) ([28ebf05](https://github.com/drmartinwimmer/aiw/commit/28ebf05eafda4f0849a0bf4a638cfabbb252a5dd))
+
 ## [0.4.0](https://github.com/drmartinwimmer/aiw/compare/ai-workspace-v0.3.0...ai-workspace-v0.4.0) (2026-10-03)
 
 
