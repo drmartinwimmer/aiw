@@ -57,7 +57,7 @@ exit 0
     expect_that!(&logged, contains_substring("pane run w1:p10 fence"));
     expect_that!(
         &logged,
-        contains_substring("agy --dangerously-skip-permissions")
+        contains_substring("agy --dangerously-skip-permissions; exit")
     );
     Ok(())
 }

@@ -330,7 +330,7 @@ impl Herdr {
     }
 
     /// Creates a tab named after `workspace_name`, informs Herdr about the agent being run,
-    /// and executes `command` in the newly created tab.
+    /// and executes `command` in the newly created tab, closing the pane when the command exits.
     pub(crate) fn open_workspace_tab_and_execute(
         &self,
         workspace_name: &str,
@@ -344,7 +344,8 @@ impl Herdr {
         // Give the shell process in the newly created pane a brief moment to initialize its prompt
         std::thread::sleep(std::time::Duration::from_millis(300));
 
-        self.execute_in_pane(&tab.root_pane_id, command)?;
+        let pane_command = format!("{command}; exit");
+        self.execute_in_pane(&tab.root_pane_id, &pane_command)?;
         Ok(tab)
     }
 
@@ -675,7 +676,7 @@ exit 0
         );
         expect_that!(
             &logged,
-            contains_substring("pane run w1:p12 fence -- echo 1")
+            contains_substring("pane run w1:p12 fence -- echo 1; exit")
         );
         Ok(())
     }
