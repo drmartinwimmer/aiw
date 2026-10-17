@@ -71,6 +71,20 @@ impl ConfigInitializer {
         std::fs::write(&fence_jsonc, content)?;
         Ok(fence_jsonc)
     }
+
+    /// Returns template candidate paths from system data directories (`$XDG_DATA_DIRS`).
+    #[must_use]
+    pub fn system_template_paths() -> Vec<PathBuf> {
+        let mut candidates = Vec::new();
+        if let Ok(data_dirs) = std::env::var("XDG_DATA_DIRS") {
+            for data_dir in data_dirs.split(':').filter(|s| !s.is_empty()) {
+                candidates.push(Path::new(data_dir).join("aiw").join("fence.jsonc"));
+            }
+        }
+        candidates.push(PathBuf::from("/usr/local/share/aiw/fence.jsonc"));
+        candidates.push(PathBuf::from("/usr/share/aiw/fence.jsonc"));
+        candidates
+    }
 }
 
 #[cfg(test)]
