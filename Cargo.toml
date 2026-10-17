@@ -85,6 +85,5 @@ allow_attributes_without_reason = "warn"
 
 [package.metadata.purist.lints]
 config_struct_naming = "allow"
-free_functions = "allow"
 no_env_access_outside_config = "allow"
 no_println_in_libraries = "allow"
