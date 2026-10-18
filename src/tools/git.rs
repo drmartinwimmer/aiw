@@ -5,7 +5,6 @@ use std::process::Command;
 
 /// Parsed entry from `git worktree list --porcelain`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-// purist:allow(no_primitive_flag_clutter)
 pub struct GitWorktreeEntry {
     pub path: PathBuf,
     pub head: Option<String>,
