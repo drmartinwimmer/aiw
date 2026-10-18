@@ -84,5 +84,4 @@ allow_attributes = "warn"
 allow_attributes_without_reason = "warn"
 
 [package.metadata.purist.lints]
-config_struct_naming = "allow"
 no_println_in_libraries = "allow"
