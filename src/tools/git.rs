@@ -1,7 +1,72 @@
-use crate::tools::ensure_user_profile_bin_paths;
-use crate::workspace::WorkspaceError;
+use clapback::{Command, CommandError, CommandExt as _, CommandOutput};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+
+/// Errors that can occur when executing `git` commands.
+#[derive(Debug, thiserror::Error)]
+pub enum GitError {
+    #[error("Not inside a Git repository")]
+    NotInRepo,
+    #[error("Failed to execute Git command: {0}")]
+    CommandFailed(String),
+    #[error("I/O error while executing Git: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+impl From<CommandError> for GitError {
+    fn from(err: CommandError) -> Self {
+        match err {
+            CommandError::ProgramNotFound(_) => Self::NotInRepo,
+            CommandError::ExecutionFailed { stderr, stdout, .. } => {
+                Self::CommandFailed(if stderr.trim().is_empty() {
+                    stdout.trim().to_string()
+                } else {
+                    stderr.trim().to_string()
+                })
+            }
+            CommandError::Io(io_err) if io_err.kind() == std::io::ErrorKind::NotFound => {
+                Self::NotInRepo
+            }
+            CommandError::Io(io_err) => Self::Io(io_err),
+        }
+    }
+}
+
+#[derive(Command, Debug, Clone, PartialEq, Eq)]
+#[command(program = "git", arg = "--no-pager", ensure_user_path)]
+struct GitCli {
+    #[command(current_dir)]
+    current_dir: Option<PathBuf>,
+
+    #[command(subcommand)]
+    subcommand: GitSubcommand,
+}
+
+#[derive(clapback::Subcommand, Debug, Clone, PartialEq, Eq)]
+enum GitSubcommand {
+    RevParse {
+        #[arg(long)]
+        show_toplevel: bool,
+    },
+    #[command(subcommand)]
+    Worktree(GitWorktreeAction),
+}
+
+#[derive(clapback::Subcommand, Debug, Clone, PartialEq, Eq)]
+enum GitWorktreeAction {
+    List {
+        #[arg(long)]
+        porcelain: bool,
+    },
+    Prune,
+    Add {
+        path: PathBuf,
+    },
+    Remove {
+        #[arg(long)]
+        force: bool,
+        path: PathBuf,
+    },
+}
 
 /// Parsed entry from `git worktree list --porcelain`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,42 +98,31 @@ impl GitCommand {
         self
     }
 
-    fn build_cmd(&self, args: &[&str]) -> Command {
-        let mut cmd = Command::new("git");
-        cmd.arg("--no-pager");
-        cmd.args(args);
-        if let Some(ref dir) = self.current_dir {
-            cmd.current_dir(dir);
+    fn exec(&self, subcommand: GitSubcommand) -> Result<CommandOutput, GitError> {
+        Ok(GitCli {
+            current_dir: self.current_dir.clone(),
+            subcommand,
         }
-        ensure_user_profile_bin_paths(&mut cmd);
-        cmd
-    }
-
-    fn exec(&self, args: &[&str]) -> Result<std::process::Output, WorkspaceError> {
-        self.build_cmd(args).output().map_err(|err| {
-            if err.kind() == std::io::ErrorKind::NotFound {
-                WorkspaceError::NotInGitRepo
-            } else {
-                WorkspaceError::Io(err)
-            }
-        })
+        .output_unchecked()?)
     }
 
     /// Runs `git rev-parse --show-toplevel` and returns the worktree root.
-    pub fn show_toplevel(&self) -> Result<PathBuf, WorkspaceError> {
-        let output = self.exec(&["rev-parse", "--show-toplevel"])?;
+    pub fn show_toplevel(&self) -> Result<PathBuf, GitError> {
+        let output = self.exec(GitSubcommand::RevParse {
+            show_toplevel: true,
+        })?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             if stderr.to_lowercase().contains("not a git repository") {
-                return Err(WorkspaceError::NotInGitRepo);
+                return Err(GitError::NotInRepo);
             }
-            return Err(WorkspaceError::GitCommandFailed(stderr.trim().to_string()));
+            return Err(GitError::CommandFailed(stderr.trim().to_string()));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let trimmed = stdout.trim();
         if trimmed.is_empty() {
-            return Err(WorkspaceError::GitCommandFailed(
+            return Err(GitError::CommandFailed(
                 "Empty output from git rev-parse --show-toplevel".to_string(),
             ));
         }
@@ -78,14 +132,16 @@ impl GitCommand {
     }
 
     /// Runs `git worktree list --porcelain` and parses each entry into [`GitWorktreeEntry`].
-    pub fn worktree_list(&self) -> Result<Vec<GitWorktreeEntry>, WorkspaceError> {
-        let output = self.exec(&["worktree", "list", "--porcelain"])?;
+    pub fn worktree_list(&self) -> Result<Vec<GitWorktreeEntry>, GitError> {
+        let output = self.exec(GitSubcommand::Worktree(GitWorktreeAction::List {
+            porcelain: true,
+        }))?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             if stderr.to_lowercase().contains("not a git repository") {
-                return Err(WorkspaceError::NotInGitRepo);
+                return Err(GitError::NotInRepo);
             }
-            return Err(WorkspaceError::GitCommandFailed(stderr.trim().to_string()));
+            return Err(GitError::CommandFailed(stderr.trim().to_string()));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -142,52 +198,49 @@ impl GitCommand {
     }
 
     /// Runs `git worktree prune`.
-    pub fn worktree_prune(&self) -> Result<(), WorkspaceError> {
-        let output = self.exec(&["worktree", "prune"])?;
+    pub fn worktree_prune(&self) -> Result<(), GitError> {
+        let output = self.exec(GitSubcommand::Worktree(GitWorktreeAction::Prune))?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             if stderr.to_lowercase().contains("not a git repository") {
-                return Err(WorkspaceError::NotInGitRepo);
+                return Err(GitError::NotInRepo);
             }
-            return Err(WorkspaceError::GitCommandFailed(stderr.trim().to_string()));
+            return Err(GitError::CommandFailed(stderr.trim().to_string()));
         }
         Ok(())
     }
 
     /// Runs `git worktree add <path>`.
-    pub fn worktree_add(&self, path: &Path) -> Result<(), WorkspaceError> {
-        let path_str = path.to_string_lossy();
-        let output = self.exec(&["worktree", "add", &path_str])?;
+    pub fn worktree_add(&self, path: &Path) -> Result<(), GitError> {
+        let output = self.exec(GitSubcommand::Worktree(GitWorktreeAction::Add {
+            path: path.to_path_buf(),
+        }))?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             if stderr.to_lowercase().contains("not a git repository") {
-                return Err(WorkspaceError::NotInGitRepo);
+                return Err(GitError::NotInRepo);
             }
-            return Err(WorkspaceError::GitCommandFailed(stderr.trim().to_string()));
+            return Err(GitError::CommandFailed(stderr.trim().to_string()));
         }
         Ok(())
     }
 
-    /// Runs `git worktree remove [--force] <path>`.
-    pub fn worktree_remove(&self, path: &Path, force: bool) -> Result<(), WorkspaceError> {
-        let path_str = path.to_string_lossy();
-        let mut args = vec!["worktree", "remove"];
-        if force {
-            args.push("--force");
-        }
-        args.push(&path_str);
-
-        let output = self.exec(&args)?;
+    /// Runs `git worktree remove --force <path>`.
+    pub fn worktree_force_remove(&self, path: &Path) -> Result<(), GitError> {
+        let output = self.exec(GitSubcommand::Worktree(GitWorktreeAction::Remove {
+            force: true,
+            path: path.to_path_buf(),
+        }))?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stderr_lower = stderr.to_lowercase();
             if stderr_lower.contains("not a git repository") {
-                return Err(WorkspaceError::NotInGitRepo);
+                return Err(GitError::NotInRepo);
             }
             if !stderr_lower.contains("is not a working tree")
                 && !stderr_lower.contains("not a valid path")
             {
-                return Err(WorkspaceError::GitCommandFailed(stderr.trim().to_string()));
+                return Err(GitError::CommandFailed(stderr.trim().to_string()));
             }
         }
         Ok(())

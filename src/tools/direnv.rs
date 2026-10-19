@@ -1,7 +1,80 @@
-use crate::tools::ensure_user_profile_bin_paths;
+use clapback::{Command, CommandError, CommandExt as _, CommandOutput};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+
+/// Declarative wrapper for `direnv exec <dir> <command...>`.
+#[derive(Command, Debug, Clone, PartialEq, Eq)]
+#[command(program = "direnv", arg = "exec", ensure_user_path)]
+pub struct DirenvExecCommand<C: Command> {
+    pub dir: PathBuf,
+
+    #[command(wrap)]
+    pub command: C,
+}
+
+impl<C: Command> DirenvExecCommand<C> {
+    /// Wraps `command` in `direnv exec . <command...>`.
+    #[must_use]
+    pub fn dot(command: C) -> Self {
+        Self {
+            dir: PathBuf::from("."),
+            command,
+        }
+    }
+}
+
+#[derive(Command, Debug, Clone, PartialEq, Eq)]
+#[command(program = "direnv", ensure_user_path)]
+struct DirenvCli {
+    #[command(current_dir)]
+    current_dir: Option<PathBuf>,
+
+    #[command(subcommand)]
+    subcommand: DirenvSubcommand,
+}
+
+#[derive(clapback::Subcommand, Debug, Clone, PartialEq, Eq)]
+enum DirenvSubcommand {
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    Allow {
+        path: Option<PathBuf>,
+    },
+}
+
+/// Errors that can occur when executing `direnv` commands.
+#[derive(Debug, thiserror::Error)]
+pub enum DirenvError {
+    #[error("Executable 'direnv' not found in PATH")]
+    BinaryNotFound,
+    #[error("direnv allow failed: {0}")]
+    AllowFailed(String),
+    #[error("direnv command failed: {0}")]
+    CommandFailed(String),
+    #[error("I/O error while executing direnv: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+impl From<CommandError> for DirenvError {
+    fn from(err: CommandError) -> Self {
+        match err {
+            CommandError::ProgramNotFound(_) => Self::BinaryNotFound,
+            CommandError::ExecutionFailed { stderr, stdout, .. } => {
+                Self::CommandFailed(if stderr.trim().is_empty() {
+                    stdout
+                } else {
+                    stderr
+                })
+            }
+            CommandError::Io(io_err) if io_err.kind() == std::io::ErrorKind::NotFound => {
+                Self::BinaryNotFound
+            }
+            CommandError::Io(io_err) => Self::Io(io_err),
+        }
+    }
+}
 
 /// Parsed output from `direnv status`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -29,27 +102,25 @@ impl DirenvCommand {
         self
     }
 
-    fn build_cmd(&self, args: &[&str]) -> Command {
-        let mut cmd = Command::new("direnv");
-        cmd.args(args);
-        if let Some(ref dir) = self.current_dir {
-            cmd.current_dir(dir);
+    fn exec(&self, subcommand: DirenvSubcommand) -> Result<CommandOutput, DirenvError> {
+        Ok(DirenvCli {
+            current_dir: self.current_dir.clone(),
+            subcommand,
         }
-        ensure_user_profile_bin_paths(&mut cmd);
-        cmd
+        .output_unchecked()?)
     }
 
     /// Checks the status of direnv in the target directory.
-    pub fn status(&self) -> Result<DirenvStatusOutput, std::io::Error> {
+    pub fn status(&self) -> Result<DirenvStatusOutput, DirenvError> {
         // Try `direnv status --json` first (direnv >= 2.37.1)
-        if let Ok(out) = self.build_cmd(&["status", "--json"]).output()
+        if let Ok(out) = self.exec(DirenvSubcommand::Status { json: true })
             && out.status.success()
         {
             return Ok(Self::parse_status(&out.stdout));
         }
 
         // Fallback to plain human-readable `direnv status` (direnv < 2.37.1)
-        let plain_out = self.build_cmd(&["status"]).output()?;
+        let plain_out = self.exec(DirenvSubcommand::Status { json: false })?;
         if plain_out.status.success() {
             return Ok(Self::parse_status(&plain_out.stdout));
         }
@@ -58,17 +129,14 @@ impl DirenvCommand {
     }
 
     /// Runs `direnv allow` in the target directory.
-    pub fn allow(&self) -> Result<(), std::io::Error> {
-        let mut cmd = self.build_cmd(&["allow"]);
-        if let Some(ref dir) = self.current_dir {
-            cmd.arg(dir);
-        }
-        let output = cmd.output()?;
+    pub fn allow(&self) -> Result<(), DirenvError> {
+        let output = self.exec(DirenvSubcommand::Allow {
+            path: self.current_dir.clone(),
+        })?;
         if !output.status.success() {
-            return Err(std::io::Error::other(format!(
-                "direnv allow failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )));
+            return Err(DirenvError::AllowFailed(
+                String::from_utf8_lossy(&output.stderr).into_owned(),
+            ));
         }
         Ok(())
     }

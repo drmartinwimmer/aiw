@@ -17,6 +17,7 @@ version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
+ "clapback",
  "directories",
  "googletest",
  "serde",
@@ -145,6 +146,27 @@ name = "clap_lex"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
+
+[[package]]
+name = "clapback"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0f24ef918f0428a3459d01add1638609cfc76dd9c80d39fdd49f307fc1ed72b"
+dependencies = [
+ "clapback-derive",
+ "thiserror",
+]
+
+[[package]]
+name = "clapback-derive"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2751a1189c935545b8a7528dea690ea078bd5b730a7c2ee66a39936a76ed95ee"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.5",
+]
 
 [[package]]
 name = "colorchoice"

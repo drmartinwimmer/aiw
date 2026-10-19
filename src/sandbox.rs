@@ -1,10 +1,30 @@
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
+use clapback::{CommandError, CommandExt as _, EitherCommand, ToArgs};
+
 #[cfg(not(test))]
 use crate::config::ConfigInitializer;
-use crate::tools::FenceCommand;
+use crate::tools::{DirenvExecCommand, FenceCommand};
 use crate::workspace::Workspace;
+
+#[derive(Debug, Clone, Copy)]
+struct PayloadCommand<'a>(&'a [String]);
+
+impl ToArgs for PayloadCommand<'_> {
+    fn append_args(&self, args: &mut Vec<OsString>) {
+        if let Some((_program, rest)) = self.0.split_first() {
+            args.extend(rest.iter().map(OsString::from));
+        }
+    }
+}
+
+impl clapback::Command for PayloadCommand<'_> {
+    fn program(&self) -> &OsStr {
+        self.0.first().map_or_else(|| OsStr::new(""), OsStr::new)
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum SandboxError {
@@ -73,25 +93,6 @@ impl<'a> SandboxBuilder<'a> {
         self
     }
 
-    fn append_settings_args(&self, cmd: &mut Command) {
-        if let Some(settings) = self.resolve_settings_path() {
-            cmd.args(["--settings", &settings.to_string_lossy()]);
-        }
-    }
-
-    pub(crate) fn append_direnv_args(&self, cmd: &mut Command) -> Result<(), SandboxError> {
-        if !self.use_direnv {
-            return Ok(());
-        }
-        if cmd.get_args().last() != Some(std::ffi::OsStr::new("--")) {
-            return Err(SandboxError::InvalidArgOrder(
-                "direnv arguments must be appended immediately after '--'".to_string(),
-            ));
-        }
-        cmd.args(["direnv", "exec", "."]);
-        Ok(())
-    }
-
     fn resolve_settings_path(&self) -> Option<PathBuf> {
         self.settings_path
             .filter(|p| p.exists())
@@ -138,15 +139,17 @@ impl<'a> SandboxBuilder<'a> {
         }
     }
 
-    fn construct_command(&self) -> Result<Command, SandboxError> {
-        let mut cmd = FenceCommand::create(self.workspace_path);
-
-        self.append_settings_args(&mut cmd);
-        cmd.arg("--");
-        self.append_direnv_args(&mut cmd)?;
-        cmd.args(self.command);
-
-        Ok(cmd)
+    fn fence_command(
+        &self,
+    ) -> FenceCommand<EitherCommand<DirenvExecCommand<PayloadCommand<'a>>, PayloadCommand<'a>>>
+    {
+        PayloadCommand(self.command)
+            .wrap_if(self.use_direnv, DirenvExecCommand::dot)
+            .wrap_with(|cmd| FenceCommand {
+                workspace_path: self.workspace_path.to_path_buf(),
+                settings: self.resolve_settings_path(),
+                command: cmd,
+            })
     }
 
     /// Builds the `std::process::Command` prepared to execute fence.
@@ -155,21 +158,21 @@ impl<'a> SandboxBuilder<'a> {
             return Err(SandboxError::FenceNotFound);
         }
 
-        self.construct_command()
+        Ok(self.fence_command().to_std_command())
     }
 
     /// Executes fence synchronously, forwarding standard I/O.
     /// Returns `Ok(())` on success, or `Err(SandboxError::ExecutionFailed)` if the command exited with a non-zero status.
     pub fn run(&self) -> Result<(), SandboxError> {
-        let mut cmd = self.build_command()?;
-        cmd.stdin(std::process::Stdio::inherit())
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit());
-        let status = cmd.status()?;
-        if !status.success() {
-            return Err(SandboxError::ExecutionFailed(status));
+        if which::which("fence").is_err() {
+            return Err(SandboxError::FenceNotFound);
         }
-        Ok(())
+
+        self.fence_command().run().map_err(|err| match err {
+            CommandError::ProgramNotFound(_) => SandboxError::FenceNotFound,
+            CommandError::ExecutionFailed { status, .. } => SandboxError::ExecutionFailed(status),
+            CommandError::Io(io_err) => SandboxError::Io(io_err),
+        })
     }
 
     #[cfg(test)]
@@ -184,12 +187,7 @@ impl<'a> SandboxBuilder<'a> {
 
 impl std::fmt::Display for SandboxBuilder<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let cmd = self.construct_command().map_err(|_err| std::fmt::Error)?;
-        write!(f, "{}", cmd.get_program().to_string_lossy())?;
-        for arg in cmd.get_args() {
-            write!(f, " {}", arg.to_string_lossy())?;
-        }
-        Ok(())
+        write!(f, "{}", self.fence_command())
     }
 }
 
@@ -414,45 +412,6 @@ mod tests {
     }
 
     #[googletest::test]
-    fn append_direnv_args_called_out_of_order_returns_error() -> TestResult {
-        let temp_dir = tempfile::tempdir()?;
-        let repo_root = temp_dir.path();
-        let ws_path = repo_root.join("ws");
-        let cmd_payload = vec!["echo".to_string()];
-
-        let builder = SandboxBuilder::new(&ws_path, repo_root, &cmd_payload).with_direnv(true);
-
-        // Case 1: called on Command without "--" separator
-        let mut cmd1 = Command::new("fence");
-        let res1 = builder.append_direnv_args(&mut cmd1);
-        expect_that!(
-            res1,
-            matches_pattern!(Err(matches_pattern!(SandboxError::InvalidArgOrder(
-                anything()
-            ))))
-        );
-
-        // Case 2: called after command arguments already present
-        let mut cmd2 = Command::new("fence");
-        cmd2.arg("--");
-        cmd2.arg("echo");
-        let res2 = builder.append_direnv_args(&mut cmd2);
-        expect_that!(
-            res2,
-            matches_pattern!(Err(matches_pattern!(SandboxError::InvalidArgOrder(
-                anything()
-            ))))
-        );
-
-        // Case 3: called immediately after "--" succeeds
-        let mut cmd3 = Command::new("fence");
-        cmd3.arg("--");
-        let res3 = builder.append_direnv_args(&mut cmd3);
-        expect_that!(res3, ok(anything()));
-        Ok(())
-    }
-
-    #[googletest::test]
     fn display_trait_produces_readable_shell_string() -> TestResult {
         let temp_dir = tempfile::tempdir()?;
         let repo_root = temp_dir.path().join("repo");
@@ -464,7 +423,7 @@ mod tests {
             SandboxBuilder::new(&workspace_path, &repo_root, &custom_cmd).with_direnv(true);
 
         let formatted = format!("{builder}");
-        expect_that!(&formatted, eq("fence -- direnv exec . sh -c echo hi"));
+        expect_that!(&formatted, eq("fence -- direnv exec . sh -c 'echo hi'"));
         expect_that!(&builder.to_string(), eq(&formatted));
         Ok(())
     }

@@ -70,7 +70,8 @@ impl Git {
 
         GitCommand::new()
             .current_dir(&self.repo_root)
-            .worktree_add(rel_workspace_path)
+            .worktree_add(rel_workspace_path)?;
+        Ok(())
     }
 
     /// Forgets/removes a Git worktree from the repository.
@@ -79,7 +80,7 @@ impl Git {
 
         GitCommand::new()
             .current_dir(&self.repo_root)
-            .worktree_remove(&ws_path, true)?;
+            .worktree_force_remove(&ws_path)?;
 
         GitCommand::new()
             .current_dir(&self.repo_root)
