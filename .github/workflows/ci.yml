@@ -114,3 +114,52 @@ jobs:
 
       - name: Build Nix package
         run: nix build
+
+  auto-merge:
+    name: Dependabot Auto-Merge
+    needs: [lint, test, nix]
+    if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-merge patch and minor updates
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+          UPDATED_DEPS_JSON: ${{ steps.metadata.outputs.updated-dependencies-json }}
+        run: |
+          SHOULD_MERGE=false
+          if [ "$UPDATE_TYPE" = "version-update:semver-patch" ] || [ "$UPDATE_TYPE" = "version-update:semver-minor" ]; then
+            SHOULD_MERGE=true
+          elif echo "$UPDATED_DEPS_JSON" | jq -e '
+            map(select((.newVersion // "") | test("^[0-9a-f]{40}$") | not))
+            | length > 0 and all(.updateType == "version-update:semver-patch" or .updateType == "version-update:semver-minor")
+          ' > /dev/null; then
+            SHOULD_MERGE=true
+          fi
+
+          if [ "$SHOULD_MERGE" = "true" ]; then
+            if ! gh pr merge --auto --squash "$PR_URL"; then
+              for attempt in 1 2 3; do
+                if gh pr merge --squash "$PR_URL"; then
+                  break
+                fi
+                if [ "$attempt" -lt 3 ]; then
+                  sleep 5
+                else
+                  exit 1
+                fi
+              done
+            fi
+          else
+            echo "Skipping auto-merge for update type: $UPDATE_TYPE"
+          fi

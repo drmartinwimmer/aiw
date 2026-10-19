@@ -32,12 +32,12 @@ updates:
     multi-ecosystem-group: "rust-toolchain"
     patterns:
       - "*"
-    open-pull-requests-limit: 10
 
   - package-ecosystem: "nix"
     directory: "/"
     multi-ecosystem-group: "rust-toolchain"
     patterns:
       - "*"
-    open-pull-requests-limit: 10
-
+    cooldown:
+      exclude:
+        - "*"
