@@ -24,21 +24,15 @@
 - `pub fn Cli::run() -> Result < () , AppError >`
 - `pub fn ConfigInitializer::init_project_config(target_dir: & Path, force: bool) -> Result < PathBuf , ConfigInitError >` — _Initializes project configuration (fence.jsonc) in `target_dir` if it does not exist yet (or if force is true)._
 - `pub fn ConfigInitializer::init_user_config(force: bool) -> Result < PathBuf , ConfigInitError >` — _Initializes user configuration (~/.config/aiw/fence.jsonc) if it does not exist yet (or if force is true)._
-- `pub fn ConfigInitializer::system_template_paths() -> Vec < PathBuf >` — _Returns template candidate paths from system data directories (`$XDG_DATA_DIRS`)._
-- `pub fn ConfigInitializer::user_config_path() -> Option < PathBuf >` — _Returns the canonical user config path (e.g. ~/.config/aiw/fence.jsonc)._
 - `pub fn Direnv::allow_workspace(& self, workspace_path: & Path)` — _If direnv is allowed for the repository and the workspace directory contains an `.envrc` or `.env`,_
-- `pub fn Direnv::has_envrc(dir: & Path) -> bool` — _Checks if a directory contains a `.envrc` or `.env` file._
 - `pub fn Direnv::is_allowed(& self) -> bool` — _Returns `true` if direnv is active and allowed for the repository root._
 - `pub fn Direnv::is_dir_allowed(dir: & Path) -> bool` — _Checks if `direnv` is allowed in the specified directory by inspecting `direnv status`._
 - `pub fn Direnv::new(repo_root: & Path) -> Self` — _Inspects the given repository root once and determines whether direnv is active and allowed._
-- `pub fn Direnv::repo_root(& self) -> & Path` — _Returns the repository root path associated with this `Direnv` instance._
 - `pub fn SandboxBuilder < 'a >::build_command(& self) -> Result < Command , SandboxError >` — _Builds the `std::process::Command` prepared to execute fence._
 - `pub fn SandboxBuilder < 'a >::for_workspace(workspace: & 'a Workspace, command: & 'a [String]) -> Self` — _Creates a new `SandboxBuilder` configured for the given `Workspace` and required payload command._
 - `pub fn SandboxBuilder < 'a >::new(workspace_path: & 'a Path, repo_root: & 'a Path, command: & 'a [String]) -> Self` — _Creates a new `SandboxBuilder` for the specified workspace, repository root, and required payload command._
 - `pub fn SandboxBuilder < 'a >::run(& self) -> Result < () , SandboxError >` — _Executes fence synchronously, forwarding standard I/O._
 - `pub fn SandboxBuilder < 'a >::with_direnv(mut self, use_direnv: bool) -> Self` — _Configures whether `direnv exec .` is prepended to the container payload command._
-- `pub fn SandboxBuilder < 'a >::with_settings_path(mut self, settings_path: & 'a Path) -> Self` — _Explicit path to fence settings file (`fence.json` or `fence.jsonc`)._
-- `pub fn SandboxBuilder < 'a >::with_use_direnv(self, use_direnv: bool) -> Self` — _Configures whether `direnv exec .` is prepended to the container payload command._
 - `pub fn Workspace::ensure(& self) -> Result < bool , WorkspaceError >` — _Ensures the workspace exists on disk and is registered in the underlying VCS._
 - `pub fn Workspace::exists(& self) -> bool` — _Returns `true` if the workspace currently exists on disk and contains appropriate VCS metadata._
 - `pub fn Workspace::forget(& self) -> Result < () , WorkspaceError >` — _Forgets the workspace in the underlying VCS and removes the workspace directory from disk._
@@ -49,15 +43,6 @@
 - `pub fn Workspace::new(repo_root: & Path, name: & str) -> Result < Self , WorkspaceError >` — _Creates a new `Workspace` instance for a given repository root and workspace name._
 - `pub fn Workspace::path(& self) -> & Path` — _Returns the workspace directory path._
 - `pub fn Workspace::repo_root(& self) -> & Path` — _Returns the enclosing repository root path._
-- `pub fn Workspace::worktree_root(& self) -> & Path` — _Returns the current worktree or workspace root path of the enclosing repository._
-
-### Constants & Statics
-
-- `pub const DEFAULT_AIW_TEMPLATE: & str = include_str ! ("../templates/fence.jsonc");` — _Default embedded `fence.jsonc` template content for aiw._
-
-### Re-exports
-
-- `pub use config::DEFAULT_AIW_TEMPLATE;`
 
 ## 2. CLI API
 

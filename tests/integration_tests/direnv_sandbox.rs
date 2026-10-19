@@ -1,7 +1,5 @@
 use super::common::{can_run_fence, init_test_jj_repo, run_aiw, write_test_fence_json};
-use aiw::direnv::Direnv;
-use aiw::sandbox::SandboxBuilder;
-use aiw::workspace::Workspace;
+use aiw::{Direnv, SandboxBuilder, Workspace};
 use googletest::prelude::*;
 use std::path::Path;
 use std::process::Command;
@@ -144,7 +142,7 @@ fn direnv_allow_called_on_new_workspace_iff_allowed_in_root() -> TestResult {
         .current_dir(repo_allowed)
         .output()?;
     expect_that!(allow_res.status.success(), is_true());
-    expect_that!(aiw::direnv::Direnv::is_dir_allowed(repo_allowed), is_true());
+    expect_that!(Direnv::is_dir_allowed(repo_allowed), is_true());
 
     // Run aiw to create new workspace
     let out_allowed = run_aiw(repo_allowed, &["agy", "new-ws-allowed", "--dry-run"]);
@@ -153,7 +151,7 @@ fn direnv_allow_called_on_new_workspace_iff_allowed_in_root() -> TestResult {
     let ws_allowed = repo_allowed.join(".workspaces").join("new-ws-allowed");
     expect_that!(ws_allowed.join(".envrc").exists(), is_true());
     // direnv allow was called on new workspace because root was allowed:
-    expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_allowed), is_true());
+    expect_that!(Direnv::is_dir_allowed(&ws_allowed), is_true());
 
     // Case 2: Root is NOT allowed -> new workspace does NOT get auto-allowed
     let dir_unallowed = tempfile::tempdir()?;
@@ -168,10 +166,7 @@ fn direnv_allow_called_on_new_workspace_iff_allowed_in_root() -> TestResult {
         .current_dir(repo_unallowed)
         .status()?;
     expect_that!(status.success(), is_true());
-    expect_that!(
-        aiw::direnv::Direnv::is_dir_allowed(repo_unallowed),
-        is_false()
-    );
+    expect_that!(Direnv::is_dir_allowed(repo_unallowed), is_false());
 
     // Run aiw to create new workspace in unallowed repo
     let out_unallowed = run_aiw(repo_unallowed, &["agy", "new-ws-unallowed", "--dry-run"]);
@@ -180,10 +175,7 @@ fn direnv_allow_called_on_new_workspace_iff_allowed_in_root() -> TestResult {
     let ws_unallowed = repo_unallowed.join(".workspaces").join("new-ws-unallowed");
     expect_that!(ws_unallowed.join(".envrc").exists(), is_true());
     // direnv allow was NOT called because root was not allowed:
-    expect_that!(
-        aiw::direnv::Direnv::is_dir_allowed(&ws_unallowed),
-        is_false()
-    );
+    expect_that!(Direnv::is_dir_allowed(&ws_unallowed), is_false());
     Ok(())
 }
 
@@ -212,14 +204,14 @@ fn existing_workspace_does_not_call_direnv_allow() -> TestResult {
         .current_dir(repo_root)
         .output()?;
     expect_that!(allow_res.status.success(), is_true());
-    expect_that!(aiw::direnv::Direnv::is_dir_allowed(repo_root), is_true());
+    expect_that!(Direnv::is_dir_allowed(repo_root), is_true());
 
     // Create the workspace initially
     let out1 = run_aiw(repo_root, &["agy", "existing-ws", "--dry-run"]);
     expect_that!(out1.status.success(), is_true());
 
     let ws_path = repo_root.join(".workspaces").join("existing-ws");
-    expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_path), is_true());
+    expect_that!(Direnv::is_dir_allowed(&ws_path), is_true());
 
     // Invalidate the workspace allow status by modifying its .envrc
     std::fs::write(
@@ -227,14 +219,14 @@ fn existing_workspace_does_not_call_direnv_allow() -> TestResult {
         "export ROOT_VAR=ok\nexport MODIFIED=1\n",
     )?;
     // Verify direnv now considers it unallowed/blocked:
-    expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_path), is_false());
+    expect_that!(Direnv::is_dir_allowed(&ws_path), is_false());
 
     // Run aiw again on the existing workspace
     let out2 = run_aiw(repo_root, &["agy", "existing-ws", "--dry-run"]);
     expect_that!(out2.status.success(), is_true());
 
     // direnv allow must NOT have been called because this is an existing workspace!
-    expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_path), is_false());
+    expect_that!(Direnv::is_dir_allowed(&ws_path), is_false());
     Ok(())
 }
 

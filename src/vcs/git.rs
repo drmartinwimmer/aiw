@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Git {
     repo_root: PathBuf,
-    worktree_root: PathBuf,
 }
 
 impl Git {
@@ -28,24 +27,15 @@ impl Git {
         let repo_root = worktrees
             .first()
             .map(|wt| wt.path.clone())
-            .unwrap_or_else(|| worktree_root.clone());
+            .unwrap_or(worktree_root);
 
-        Ok(Self {
-            repo_root,
-            worktree_root,
-        })
+        Ok(Self { repo_root })
     }
 
     /// Returns the repository root path.
     #[must_use]
     pub fn repo_root(&self) -> &Path {
         &self.repo_root
-    }
-
-    /// Returns the active worktree root path.
-    #[must_use]
-    pub fn worktree_root(&self) -> &Path {
-        &self.worktree_root
     }
 
     /// Checks if a Git worktree for `workspace_name` is currently registered.
