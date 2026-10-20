@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use crate::tools::{GitError, JjError};
 use crate::vcs::Vcs;
 
 #[derive(Debug, thiserror::Error)]
@@ -18,6 +19,26 @@ pub enum WorkspaceError {
     InvalidWorkspaceName(String),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+impl From<GitError> for WorkspaceError {
+    fn from(err: GitError) -> Self {
+        match err {
+            GitError::NotInRepo => Self::NotInGitRepo,
+            GitError::CommandFailed(msg) => Self::GitCommandFailed(msg),
+            GitError::Io(io_err) => Self::Io(io_err),
+        }
+    }
+}
+
+impl From<JjError> for WorkspaceError {
+    fn from(err: JjError) -> Self {
+        match err {
+            JjError::NotInRepo => Self::NotInJjRepo,
+            JjError::CommandFailed(msg) => Self::JjCommandFailed(msg),
+            JjError::Io(io_err) => Self::Io(io_err),
+        }
+    }
 }
 
 pub(crate) fn validate_workspace_name(workspace_name: &str) -> Result<(), WorkspaceError> {

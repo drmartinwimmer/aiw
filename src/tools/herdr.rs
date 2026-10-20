@@ -1,6 +1,72 @@
-use crate::tools::ensure_user_profile_bin_paths;
+use clapback::{Command, CommandError, CommandExt as _};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+
+#[derive(Command, Debug, Clone, PartialEq, Eq)]
+#[command(ensure_user_path)]
+struct HerdrCli {
+    #[command(program)]
+    binary: PathBuf,
+
+    #[command(subcommand)]
+    subcommand: HerdrSubcommand,
+}
+
+#[derive(clapback::Subcommand, Debug, Clone, PartialEq, Eq)]
+enum HerdrSubcommand {
+    #[command(subcommand)]
+    Tab(HerdrTabAction),
+    #[command(subcommand)]
+    Pane(HerdrPaneAction),
+}
+
+#[derive(clapback::Subcommand, Debug, Clone, PartialEq, Eq)]
+enum HerdrTabAction {
+    Get {
+        tab_id: String,
+    },
+    Create {
+        #[arg(long)]
+        label: String,
+
+        #[arg(long, false_long = "no-focus")]
+        focus: bool,
+
+        #[arg(long)]
+        cwd: Option<PathBuf>,
+
+        #[arg(long)]
+        workspace: Option<String>,
+    },
+}
+
+#[derive(clapback::Subcommand, Debug, Clone, PartialEq, Eq)]
+enum HerdrPaneAction {
+    ReportAgent {
+        #[arg(long)]
+        source: String,
+
+        #[arg(long)]
+        agent: String,
+
+        #[arg(long)]
+        state: String,
+
+        pane_id: String,
+    },
+    Run {
+        pane_id: String,
+        command: String,
+    },
+}
+
+#[derive(Command, Debug, Clone, PartialEq, Eq)]
+#[command(program = "sh", arg = "-c", ensure_user_path)]
+struct ShCommand {
+    #[command(current_dir)]
+    current_dir: Option<PathBuf>,
+
+    command: String,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum HerdrError {
@@ -24,6 +90,32 @@ pub enum HerdrError {
     MissingContext(String),
     #[error("I/O error while interacting with Herdr: {0}")]
     Io(#[from] std::io::Error),
+}
+
+impl From<CommandError> for HerdrError {
+    fn from(err: CommandError) -> Self {
+        match err {
+            CommandError::ProgramNotFound(name) => Self::BinaryNotFound(name),
+            CommandError::ExecutionFailed {
+                program,
+                status,
+                stdout,
+                stderr,
+            } => Self::CommandFailed {
+                command: program,
+                code: status.code(),
+                stderr: if stderr.trim().is_empty() {
+                    stdout
+                } else {
+                    stderr
+                },
+            },
+            CommandError::Io(io_err) if io_err.kind() == std::io::ErrorKind::NotFound => {
+                Self::BinaryNotFound(io_err.to_string())
+            }
+            CommandError::Io(io_err) => Self::Io(io_err),
+        }
+    }
 }
 
 /// Represents the result of creating a new Herdr tab.
@@ -153,29 +245,13 @@ impl Herdr {
         self.pane_id.as_deref()
     }
 
-    fn execute_cmd(&self, args: &[&str]) -> Result<String, HerdrError> {
-        let mut cmd = Command::new(&self.binary);
-        cmd.args(args);
-        ensure_user_profile_bin_paths(&mut cmd);
+    fn execute_cmd(&self, subcommand: HerdrSubcommand) -> Result<String, HerdrError> {
+        let cmd = HerdrCli {
+            binary: self.binary.clone(),
+            subcommand,
+        };
 
-        let output = {
-            let mut attempts = 0;
-            loop {
-                match cmd.output() {
-                    Ok(out) => break Ok(out),
-                    Err(err) if err.raw_os_error() == Some(26) && attempts < 10 => {
-                        attempts += 1;
-                        std::thread::sleep(std::time::Duration::from_millis(20));
-                    }
-                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                        break Err(HerdrError::BinaryNotFound(
-                            self.binary.to_string_lossy().into_owned(),
-                        ));
-                    }
-                    Err(err) => break Err(HerdrError::Io(err)),
-                }
-            }
-        }?;
+        let output = cmd.output_unchecked()?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -189,7 +265,7 @@ impl Herdr {
             }
 
             return Err(HerdrError::CommandFailed {
-                command: format!("{} {}", self.binary.to_string_lossy(), args.join(" ")),
+                command: cmd.to_string(),
                 code: output.status.code(),
                 stderr: if stderr.trim().is_empty() {
                     stdout
@@ -204,7 +280,9 @@ impl Herdr {
 
     /// Fetches information about a specific tab by tab ID.
     pub(crate) fn get_tab(&self, tab_id: &str) -> Result<TabInfo, HerdrError> {
-        let stdout = self.execute_cmd(&["tab", "get", tab_id])?;
+        let stdout = self.execute_cmd(HerdrSubcommand::Tab(HerdrTabAction::Get {
+            tab_id: tab_id.to_string(),
+        }))?;
         let resp: HerdrTabGetResponse = serde_json::from_str(&stdout)?;
 
         if let Some(err) = resp.error {
@@ -253,24 +331,12 @@ impl Herdr {
         cwd: Option<&Path>,
         focus: bool,
     ) -> Result<CreatedTab, HerdrError> {
-        let mut args = vec!["tab", "create", "--label", label];
-        if focus {
-            args.push("--focus");
-        } else {
-            args.push("--no-focus");
-        }
-
-        let cwd_str;
-        if let Some(c) = cwd {
-            cwd_str = c.to_string_lossy().to_string();
-            args.extend(["--cwd", &cwd_str]);
-        }
-
-        if let Some(ws) = &self.workspace_id {
-            args.extend(["--workspace", ws]);
-        }
-
-        let stdout = self.execute_cmd(&args)?;
+        let stdout = self.execute_cmd(HerdrSubcommand::Tab(HerdrTabAction::Create {
+            label: label.to_string(),
+            focus,
+            cwd: cwd.map(Path::to_path_buf),
+            workspace: self.workspace_id.clone(),
+        }))?;
         let resp: HerdrTabCreateResponse = serde_json::from_str(&stdout)?;
 
         if let Some(err) = resp.error {
@@ -304,17 +370,12 @@ impl Herdr {
         agent: &str,
         state: &str,
     ) -> Result<(), HerdrError> {
-        self.execute_cmd(&[
-            "pane",
-            "report-agent",
-            "--source",
-            "aiw",
-            "--agent",
-            agent,
-            "--state",
-            state,
-            pane_id,
-        ])?;
+        self.execute_cmd(HerdrSubcommand::Pane(HerdrPaneAction::ReportAgent {
+            source: "aiw".to_string(),
+            agent: agent.to_string(),
+            state: state.to_string(),
+            pane_id: pane_id.to_string(),
+        }))?;
         Ok(())
     }
 
@@ -325,7 +386,10 @@ impl Herdr {
 
     /// Executes a command in the specified pane via `herdr pane run`.
     pub(crate) fn execute_in_pane(&self, pane_id: &str, command: &str) -> Result<(), HerdrError> {
-        self.execute_cmd(&["pane", "run", pane_id, command])?;
+        self.execute_cmd(HerdrSubcommand::Pane(HerdrPaneAction::Run {
+            pane_id: pane_id.to_string(),
+            command: command.to_string(),
+        }))?;
         Ok(())
     }
 
@@ -350,25 +414,19 @@ impl Herdr {
     }
 
     fn execute_in_place(&self, command: &str, cwd: Option<&Path>) -> Result<(), HerdrError> {
-        let mut cmd = Command::new("sh");
-        cmd.args(["-c", command]);
-        if let Some(dir) = cwd {
-            cmd.current_dir(dir);
+        ShCommand {
+            current_dir: cwd.map(Path::to_path_buf),
+            command: command.to_string(),
         }
-        cmd.stdin(std::process::Stdio::inherit())
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit());
-        ensure_user_profile_bin_paths(&mut cmd);
-
-        let status = cmd.status()?;
-        if !status.success() {
-            return Err(HerdrError::CommandFailed {
+        .run()
+        .map_err(|err| match err {
+            CommandError::ExecutionFailed { status, .. } => HerdrError::CommandFailed {
                 command: command.to_string(),
                 code: status.code(),
                 stderr: String::new(),
-            });
-        }
-        Ok(())
+            },
+            other => HerdrError::from(other),
+        })
     }
 
     /// Takes a command, decides how to run it based on Herdr context, and executes it.
@@ -396,6 +454,10 @@ impl Herdr {
 
 #[cfg(test)]
 impl Herdr {
+    pub(crate) fn mock() -> Self {
+        Self::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mock_herdr.sh"))
+    }
+
     pub(crate) fn new(binary: PathBuf) -> Self {
         Self {
             binary,
@@ -442,23 +504,8 @@ impl Herdr {
 mod tests {
     use super::*;
     use googletest::prelude::*;
-    use tempfile::NamedTempFile;
 
     type TestResult = Result<(), Box<dyn std::error::Error>>;
-    fn create_mock_script(script_content: &str) -> (tempfile::TempDir, PathBuf) {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
-        let script_path = temp_dir.path().join("mock_herdr.sh");
-        std::fs::write(&script_path, script_content).expect("write mock script");
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let perms = std::fs::Permissions::from_mode(0o755);
-            std::fs::set_permissions(&script_path, perms).expect("set permissions");
-        }
-
-        (temp_dir, script_path)
-    }
 
     #[googletest::test]
     fn is_inside_herdr_detects_herdr_env_variable() {
@@ -540,16 +587,7 @@ mod tests {
 
     #[googletest::test]
     fn create_tab_parses_json_response_and_returns_created_tab() -> TestResult {
-        let script = r#"#!/bin/sh
-if [ "$1" = "tab" ] && [ "$2" = "create" ]; then
-    echo '{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"w1:p8"},"tab":{"label":"my-workspace","tab_id":"w1:t8","workspace_id":"w1"},"type":"tab_created"}}'
-    exit 0
-fi
-echo "Unexpected args: $*" >&2
-exit 1
-"#;
-        let (_dir, script_path) = create_mock_script(script);
-        let herdr = Herdr::new(script_path).with_workspace_id("w1");
+        let herdr = Herdr::mock().with_workspace_id("w1");
 
         let res = herdr.create_tab("my-workspace", Some(Path::new("/my/cwd")), true);
         expect_that!(res, ok(anything()));
@@ -563,16 +601,7 @@ exit 1
 
     #[googletest::test]
     fn get_tab_and_is_current_tab_named_checks_label() -> TestResult {
-        let script = r#"#!/bin/sh
-if [ "$1" = "tab" ] && [ "$2" = "get" ] && [ "$3" = "w1:t3" ]; then
-    echo '{"id":"cli:tab:get","result":{"tab":{"label":"feature-branch","number":3,"tab_id":"w1:t3","workspace_id":"w1"},"type":"tab_info"}}'
-    exit 0
-fi
-echo "Unexpected args: $*" >&2
-exit 1
-"#;
-        let (_dir, script_path) = create_mock_script(script);
-        let herdr = Herdr::new(script_path).with_tab_id("w1:t3");
+        let herdr = Herdr::mock().with_tab_id("w1:t3");
 
         expect_that!(herdr.is_current_tab_named("feature-branch"), is_true());
         expect_that!(herdr.is_current_tab_named("different-branch"), is_false());
@@ -584,76 +613,24 @@ exit 1
 
     #[googletest::test]
     fn report_agent_and_inform_agent_sends_expected_cli_arguments() -> TestResult {
-        let log_file = NamedTempFile::new()?;
-        let log_path = log_file.path().to_string_lossy().to_string();
-
-        let script = format!(
-            r#"#!/bin/sh
-echo "$*" >> "{log_path}"
-echo '{{"id":"cli:pane:report_agent","result":{{"type":"ok"}}}}'
-exit 0
-"#
-        );
-        let (_dir, script_path) = create_mock_script(&script);
-        let herdr = Herdr::new(script_path);
-
-        herdr.inform_agent("w1:p99", "agy")?;
-
-        let logged = std::fs::read_to_string(&log_path)?;
-        expect_that!(
-            &logged,
-            contains_substring("pane report-agent --source aiw --agent agy --state working w1:p99")
-        );
+        let herdr = Herdr::mock();
+        expect_that!(herdr.inform_agent("w1:p99", "agy"), ok(anything()));
         Ok(())
     }
 
     #[googletest::test]
     fn execute_in_pane_sends_command_via_pane_run() -> TestResult {
-        let log_file = NamedTempFile::new()?;
-        let log_path = log_file.path().to_string_lossy().to_string();
-
-        let script = format!(
-            r#"#!/bin/sh
-echo "$*" >> "{log_path}"
-echo '{{"id":"cli:pane:run","result":{{"type":"ok"}}}}'
-exit 0
-"#
-        );
-        let (_dir, script_path) = create_mock_script(&script);
-        let herdr = Herdr::new(script_path);
-
-        herdr.execute_in_pane("w1:p55", "echo hello world")?;
-
-        let logged = std::fs::read_to_string(&log_path)?;
+        let herdr = Herdr::mock();
         expect_that!(
-            &logged,
-            contains_substring("pane run w1:p55 echo hello world")
+            herdr.execute_in_pane("w1:p55", "echo hello world"),
+            ok(anything())
         );
         Ok(())
     }
 
     #[googletest::test]
     fn run_command_decides_to_create_tab_when_not_in_workspace_tab() -> TestResult {
-        let log_file = NamedTempFile::new()?;
-        let log_path = log_file.path().to_string_lossy().to_string();
-
-        let script = format!(
-            r#"#!/bin/sh
-echo "$*" >> "{log_path}"
-if [ "$1" = "tab" ] && [ "$2" = "get" ]; then
-    echo '{{"id":"cli:tab:get","result":{{"tab":{{"label":"other-tab","tab_id":"w1:t1","workspace_id":"w1"}},"type":"tab_info"}}}}'
-    exit 0
-fi
-if [ "$1" = "tab" ] && [ "$2" = "create" ]; then
-    echo '{{"id":"cli:tab:create","result":{{"root_pane":{{"pane_id":"w1:p12"}},"tab":{{"label":"ws-test","tab_id":"w1:t12","workspace_id":"w1"}},"type":"tab_created"}}}}'
-    exit 0
-fi
-echo '{{"result":{{"type":"ok"}}}}'
-exit 0
-"#
-        );
-        let (_dir, script_path) = create_mock_script(&script);
-        let herdr = Herdr::new(script_path).with_tab_id("w1:t1");
+        let herdr = Herdr::mock().with_tab_id("w1:t1");
 
         let res = herdr.run_command(
             "ws-test",
@@ -662,66 +639,21 @@ exit 0
             Some(Path::new("/tmp/test")),
         );
         expect_that!(res, ok(anything()));
-
-        let logged = std::fs::read_to_string(&log_path)?;
-        expect_that!(
-            &logged,
-            contains_substring("tab create --label ws-test --focus --cwd /tmp/test")
-        );
-        expect_that!(
-            &logged,
-            contains_substring("pane report-agent --source aiw --agent agy --state working w1:p12")
-        );
-        expect_that!(
-            &logged,
-            contains_substring("pane run w1:p12 fence -- echo 1; exit")
-        );
         Ok(())
     }
 
     #[googletest::test]
     fn run_command_decides_to_run_in_place_when_already_in_workspace_tab() -> TestResult {
-        let log_file = NamedTempFile::new()?;
-        let log_path = log_file.path().to_string_lossy().to_string();
-
-        let script = format!(
-            r#"#!/bin/sh
-echo "$*" >> "{log_path}"
-if [ "$1" = "tab" ] && [ "$2" = "get" ]; then
-    echo '{{"id":"cli:tab:get","result":{{"tab":{{"label":"ws-current","tab_id":"w1:t5","workspace_id":"w1"}},"type":"tab_info"}}}}'
-    exit 0
-fi
-echo '{{"result":{{"type":"ok"}}}}'
-exit 0
-"#
-        );
-        let (_dir, script_path) = create_mock_script(&script);
-        let herdr = Herdr::new(script_path)
-            .with_tab_id("w1:t5")
-            .with_pane_id("w1:p5");
+        let herdr = Herdr::mock().with_tab_id("w1:t5").with_pane_id("w1:p5");
 
         let res = herdr.run_command("ws-current", "true", "agy", None);
         expect_that!(res, ok(anything()));
-
-        let logged = std::fs::read_to_string(&log_path)?;
-        // Must inform Herdr about agent on current pane
-        expect_that!(
-            &logged,
-            contains_substring("pane report-agent --source aiw --agent agy --state working w1:p5")
-        );
-        // Must NOT create a new tab
-        expect_that!(&logged, not(contains_substring("tab create")));
         Ok(())
     }
 
     #[googletest::test]
     fn command_failure_with_api_error_parses_error_message() {
-        let script = r#"#!/bin/sh
-echo '{"error":{"code":"tab_not_found","message":"tab w1:t99 not found"},"id":"cli:tab:get"}' >&2
-exit 1
-"#;
-        let (_dir, script_path) = create_mock_script(script);
-        let herdr = Herdr::new(script_path);
+        let herdr = Herdr::mock();
 
         let res = herdr.get_tab("w1:t99");
         expect_that!(

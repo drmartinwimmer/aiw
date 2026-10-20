@@ -53,14 +53,16 @@ impl Jj {
     ) -> Result<(), WorkspaceError> {
         JjCommand::new()
             .current_dir(&self.repo_root)
-            .workspace_add(rel_workspace_path, workspace_name)
+            .workspace_add(rel_workspace_path, workspace_name)?;
+        Ok(())
     }
 
     /// Forgets a workspace in Jujutsu.
     pub fn forget_workspace(&self, workspace_name: &str) -> Result<(), WorkspaceError> {
         JjCommand::new()
             .current_dir(&self.repo_root)
-            .workspace_forget(workspace_name)
+            .workspace_forget(workspace_name)?;
+        Ok(())
     }
 
     /// Checks if a Jujutsu workspace exists on disk by checking for `.jj`.

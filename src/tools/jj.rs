@@ -1,7 +1,71 @@
-use crate::tools::ensure_user_profile_bin_paths;
-use crate::workspace::WorkspaceError;
+use clapback::{Command, CommandError, CommandExt as _, CommandOutput};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+
+/// Errors that can occur when executing `jj` commands.
+#[derive(Debug, thiserror::Error)]
+pub enum JjError {
+    #[error("Not inside a Jujutsu repository")]
+    NotInRepo,
+    #[error("Failed to execute Jujutsu command: {0}")]
+    CommandFailed(String),
+    #[error("I/O error while executing Jujutsu: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+impl From<CommandError> for JjError {
+    fn from(err: CommandError) -> Self {
+        match err {
+            CommandError::ProgramNotFound(_) => Self::NotInRepo,
+            CommandError::ExecutionFailed { stderr, stdout, .. } => {
+                Self::CommandFailed(if stderr.trim().is_empty() {
+                    stdout.trim().to_string()
+                } else {
+                    stderr.trim().to_string()
+                })
+            }
+            CommandError::Io(io_err) if io_err.kind() == std::io::ErrorKind::NotFound => {
+                Self::NotInRepo
+            }
+            CommandError::Io(io_err) => Self::Io(io_err),
+        }
+    }
+}
+
+#[derive(Command, Debug, Clone, PartialEq, Eq)]
+#[command(program = "jj", arg = "--no-pager", ensure_user_path)]
+struct JjCli {
+    #[command(current_dir)]
+    current_dir: Option<PathBuf>,
+
+    #[command(subcommand)]
+    subcommand: JjSubcommand,
+}
+
+#[derive(clapback::Subcommand, Debug, Clone, PartialEq, Eq)]
+enum JjSubcommand {
+    #[command(subcommand)]
+    Workspace(JjWorkspaceAction),
+}
+
+#[derive(clapback::Subcommand, Debug, Clone, PartialEq, Eq)]
+enum JjWorkspaceAction {
+    Root {
+        #[arg(long)]
+        name: Option<String>,
+    },
+    List {
+        #[arg(short = 'T')]
+        template: Option<String>,
+    },
+    Add {
+        path: PathBuf,
+        #[arg(long)]
+        name: String,
+    },
+    Forget {
+        name: String,
+    },
+}
 
 /// Parsed entry representing a Jujutsu workspace.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,47 +92,32 @@ impl JjCommand {
         self
     }
 
-    fn build_cmd(&self, args: &[&str]) -> Command {
-        let mut cmd = Command::new("jj");
-        cmd.arg("--no-pager");
-        cmd.args(args);
-        if let Some(ref dir) = self.current_dir {
-            cmd.current_dir(dir);
+    fn exec(&self, action: JjWorkspaceAction) -> Result<CommandOutput, JjError> {
+        Ok(JjCli {
+            current_dir: self.current_dir.clone(),
+            subcommand: JjSubcommand::Workspace(action),
         }
-        ensure_user_profile_bin_paths(&mut cmd);
-        cmd
-    }
-
-    fn exec(&self, args: &[&str]) -> Result<std::process::Output, WorkspaceError> {
-        self.build_cmd(args).output().map_err(|err| {
-            if err.kind() == std::io::ErrorKind::NotFound {
-                WorkspaceError::NotInJjRepo
-            } else {
-                WorkspaceError::Io(err)
-            }
-        })
+        .output_unchecked()?)
     }
 
     /// Runs `jj workspace root [--name <name>]` and returns the workspace root.
-    pub fn workspace_root(&self, name: Option<&str>) -> Result<PathBuf, WorkspaceError> {
-        let mut args = vec!["workspace", "root"];
-        if let Some(n) = name {
-            args.extend(["--name", n]);
-        }
-        let output = self.exec(&args)?;
+    pub fn workspace_root(&self, name: Option<&str>) -> Result<PathBuf, JjError> {
+        let output = self.exec(JjWorkspaceAction::Root {
+            name: name.map(str::to_string),
+        })?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stderr_lower = stderr.to_lowercase();
             if stderr_lower.contains("no jj repo") || stderr_lower.contains("there is no jj repo") {
-                return Err(WorkspaceError::NotInJjRepo);
+                return Err(JjError::NotInRepo);
             }
-            return Err(WorkspaceError::JjCommandFailed(stderr.trim().to_string()));
+            return Err(JjError::CommandFailed(stderr.trim().to_string()));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let trimmed = stdout.trim();
         if trimmed.is_empty() {
-            return Err(WorkspaceError::JjCommandFailed(
+            return Err(JjError::CommandFailed(
                 "Empty output from jj workspace root".to_string(),
             ));
         }
@@ -78,9 +127,10 @@ impl JjCommand {
     }
 
     /// Runs `jj workspace list` and parses entries into [`JjWorkspaceEntry`].
-    pub fn workspace_list(&self) -> Result<Vec<JjWorkspaceEntry>, WorkspaceError> {
-        let templated =
-            self.exec(&["workspace", "list", "-T", r#"name ++ "\t" ++ root ++ "\n""#])?;
+    pub fn workspace_list(&self) -> Result<Vec<JjWorkspaceEntry>, JjError> {
+        let templated = self.exec(JjWorkspaceAction::List {
+            template: Some(r#"name ++ "\t" ++ root ++ "\n""#.to_string()),
+        })?;
         if templated.status.success() {
             let stdout = String::from_utf8_lossy(&templated.stdout);
             let mut entries = Vec::new();
@@ -104,20 +154,18 @@ impl JjCommand {
         let stderr = String::from_utf8_lossy(&templated.stderr);
         let stderr_lower = stderr.to_lowercase();
         if stderr_lower.contains("no jj repo") || stderr_lower.contains("there is no jj repo") {
-            return Err(WorkspaceError::NotInJjRepo);
+            return Err(JjError::NotInRepo);
         }
 
         // Fallback to plain workspace list if template output failed
-        let fallback = self.exec(&["workspace", "list"])?;
+        let fallback = self.exec(JjWorkspaceAction::List { template: None })?;
         if !fallback.status.success() {
             let fb_stderr = String::from_utf8_lossy(&fallback.stderr);
             let fb_lower = fb_stderr.to_lowercase();
             if fb_lower.contains("no jj repo") || fb_lower.contains("there is no jj repo") {
-                return Err(WorkspaceError::NotInJjRepo);
+                return Err(JjError::NotInRepo);
             }
-            return Err(WorkspaceError::JjCommandFailed(
-                fb_stderr.trim().to_string(),
-            ));
+            return Err(JjError::CommandFailed(fb_stderr.trim().to_string()));
         }
 
         let stdout = String::from_utf8_lossy(&fallback.stdout);
@@ -137,30 +185,34 @@ impl JjCommand {
     }
 
     /// Runs `jj workspace add <path> --name <name>`.
-    pub fn workspace_add(&self, path: &Path, name: &str) -> Result<(), WorkspaceError> {
-        let path_str = path.to_string_lossy();
-        let output = self.exec(&["workspace", "add", &path_str, "--name", name])?;
+    pub fn workspace_add(&self, path: &Path, name: &str) -> Result<(), JjError> {
+        let output = self.exec(JjWorkspaceAction::Add {
+            path: path.to_path_buf(),
+            name: name.to_string(),
+        })?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stderr_lower = stderr.to_lowercase();
             if stderr_lower.contains("no jj repo") || stderr_lower.contains("there is no jj repo") {
-                return Err(WorkspaceError::NotInJjRepo);
+                return Err(JjError::NotInRepo);
             }
-            return Err(WorkspaceError::JjCommandFailed(stderr.trim().to_string()));
+            return Err(JjError::CommandFailed(stderr.trim().to_string()));
         }
         Ok(())
     }
 
     /// Runs `jj workspace forget <name>`.
-    pub fn workspace_forget(&self, name: &str) -> Result<(), WorkspaceError> {
-        let output = self.exec(&["workspace", "forget", name])?;
+    pub fn workspace_forget(&self, name: &str) -> Result<(), JjError> {
+        let output = self.exec(JjWorkspaceAction::Forget {
+            name: name.to_string(),
+        })?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stderr_lower = stderr.to_lowercase();
             if stderr_lower.contains("no jj repo") || stderr_lower.contains("there is no jj repo") {
-                return Err(WorkspaceError::NotInJjRepo);
+                return Err(JjError::NotInRepo);
             }
-            return Err(WorkspaceError::JjCommandFailed(stderr.trim().to_string()));
+            return Err(JjError::CommandFailed(stderr.trim().to_string()));
         }
         Ok(())
     }

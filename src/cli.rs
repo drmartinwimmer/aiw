@@ -8,6 +8,7 @@ use crate::vcs::Vcs;
 use crate::workspace::{Workspace, WorkspaceError};
 use clap::{Parser, Subcommand};
 use clap_complete::engine::CompletionCandidate;
+use clapback::Command;
 
 #[derive(Parser, Debug)]
 #[command(name = "aiw", about = "AI Workspace Launcher")]
@@ -155,18 +156,30 @@ struct AgyCommand {
     extra_args: Vec<String>,
 }
 
+#[derive(Command, Debug, Clone, PartialEq, Eq)]
+#[command(program = "agy")]
+struct AgyPayloadCommand {
+    #[arg(long)]
+    dangerously_skip_permissions: bool,
+
+    #[arg(trailing_var_arg = true)]
+    extra_args: Vec<String>,
+}
+
 impl AgyCommand {
-    fn build_payload_command(mut self) -> Vec<String> {
-        let mut cmd = vec!["agy".to_string()];
-        if !self
+    fn build_payload_command(self) -> Vec<String> {
+        let dangerously_skip_permissions = !self
             .extra_args
             .iter()
-            .any(|a| a == "--dangerously-skip-permissions")
-        {
-            cmd.push("--dangerously-skip-permissions".to_string());
+            .any(|a| a == "--dangerously-skip-permissions");
+        AgyPayloadCommand {
+            dangerously_skip_permissions,
+            extra_args: self.extra_args,
         }
-        cmd.append(&mut self.extra_args);
-        cmd
+        .to_argv()
+        .into_iter()
+        .map(|s| s.to_string_lossy().into_owned())
+        .collect()
     }
 
     fn run(self) -> Result<(), AppError> {
