@@ -38,6 +38,12 @@ jobs:
       - name: Run Purist AST linter
         run: purist
 
+      - name: Install api-manifest
+        run: cargo install api-manifest --locked
+
+      - name: Check API manifest drift
+        run: api-manifest check
+
       - name: Verify package & metadata
         run: cargo publish --dry-run
 

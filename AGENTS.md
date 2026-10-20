@@ -14,6 +14,7 @@
 - Keep the codebase lightweight without unnecessary dependencies.
 - Follow Rust best practices and maintain clean compiler/clippy runs.
 - Run `purist` to enforce AST and code hygiene checks; before submitting any change or PR, `purist` must run and pass cleanly.
+- Run `api-manifest check` to verify public API stability (and `api-manifest dump` to update `API.md` when public API changes are intentional).
 
 ## 3. Commit Messages & Conventional Commits
 
