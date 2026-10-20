@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use directories::ProjectDirs;
 
 /// Default embedded `fence.jsonc` template content for aiw.
-pub const DEFAULT_AIW_TEMPLATE: &str = include_str!("../templates/fence.jsonc");
+const DEFAULT_AIW_TEMPLATE: &str = include_str!("../templates/fence.jsonc");
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigInitError {
@@ -20,7 +20,7 @@ pub struct ConfigInitializer;
 impl ConfigInitializer {
     /// Returns the canonical user config path (e.g. ~/.config/aiw/fence.jsonc).
     #[must_use]
-    pub fn user_config_path() -> Option<PathBuf> {
+    pub(crate) fn user_config_path() -> Option<PathBuf> {
         ProjectDirs::from("", "", "aiw").map(|proj| proj.config_dir().join("fence.jsonc"))
     }
 
@@ -74,7 +74,7 @@ impl ConfigInitializer {
 
     /// Returns template candidate paths from system data directories (`$XDG_DATA_DIRS`).
     #[must_use]
-    pub fn system_template_paths() -> Vec<PathBuf> {
+    pub(crate) fn system_template_paths() -> Vec<PathBuf> {
         let mut candidates = Vec::new();
         if let Ok(data_dirs) = std::env::var("XDG_DATA_DIRS") {
             for data_dir in data_dirs.split(':').filter(|s| !s.is_empty()) {
@@ -103,6 +103,18 @@ mod tests {
             contains_substring("\"extends\": \"code\"")
         );
         expect_that!(DEFAULT_AIW_TEMPLATE, contains_substring("\"/nix\""));
+    }
+
+    #[googletest::test]
+    fn system_template_paths_includes_standard_locations() {
+        let paths = ConfigInitializer::system_template_paths();
+        expect_that!(
+            paths,
+            superset_of([
+                &PathBuf::from("/usr/local/share/aiw/fence.jsonc"),
+                &PathBuf::from("/usr/share/aiw/fence.jsonc"),
+            ])
+        );
     }
 
     #[googletest::test]

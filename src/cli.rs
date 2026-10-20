@@ -71,7 +71,7 @@ struct CompletionCommand {
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ShellChoice {
+enum ShellChoice {
     /// Bourne Again SHell (bash)
     Bash,
     /// Elvish shell

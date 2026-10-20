@@ -1,6 +1,5 @@
 use super::common::{can_run_fence, init_test_jj_repo, run_aiw, write_test_fence_json};
-use aiw::sandbox::SandboxBuilder;
-use aiw::workspace::Workspace;
+use aiw::{Direnv, SandboxBuilder, Workspace};
 use googletest::prelude::*;
 use std::process::Command;
 
@@ -243,7 +242,7 @@ fn recreating_forgotten_workspace_calls_direnv_allow() -> TestResult {
     let out1 = run_aiw(repo_root, &["agy", "recreated-ws", "--dry-run"]);
     expect_that!(out1.status.success(), is_true());
     let ws_path = repo_root.join(".workspaces").join("recreated-ws");
-    expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_path), is_true());
+    expect_that!(Direnv::is_dir_allowed(&ws_path), is_true());
 
     // 2. Forget workspace
     let forget_out = run_aiw(repo_root, &["forget", "recreated-ws"]);
@@ -255,7 +254,7 @@ fn recreating_forgotten_workspace_calls_direnv_allow() -> TestResult {
     expect_that!(out2.status.success(), is_true());
 
     // 4. Must have called direnv allow again because it's a re-created new workspace!
-    expect_that!(aiw::direnv::Direnv::is_dir_allowed(&ws_path), is_true());
+    expect_that!(Direnv::is_dir_allowed(&ws_path), is_true());
     Ok(())
 }
 

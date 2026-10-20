@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Jj {
     repo_root: PathBuf,
-    workspace_root: PathBuf,
 }
 
 impl Jj {
@@ -26,24 +25,15 @@ impl Jj {
         let repo_root = JjCommand::new()
             .current_dir(&workspace_root)
             .workspace_root(Some("default"))
-            .unwrap_or_else(|_| workspace_root.clone());
+            .unwrap_or(workspace_root);
 
-        Ok(Self {
-            repo_root,
-            workspace_root,
-        })
+        Ok(Self { repo_root })
     }
 
     /// Returns the repository root path.
     #[must_use]
     pub fn repo_root(&self) -> &Path {
         &self.repo_root
-    }
-
-    /// Returns the active workspace root path.
-    #[must_use]
-    pub fn workspace_root(&self) -> &Path {
-        &self.workspace_root
     }
 
     /// Checks if a Jujutsu workspace with `workspace_name` is registered.

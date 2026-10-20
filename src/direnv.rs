@@ -1,11 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::tools::DirenvCommand;
 
 /// Encapsulates direnv detection and authorization state for a repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Direnv {
-    repo_root: PathBuf,
     allowed: bool,
 }
 
@@ -14,10 +13,7 @@ impl Direnv {
     #[must_use]
     pub fn new(repo_root: &Path) -> Self {
         let allowed = Self::is_dir_allowed(repo_root);
-        Self {
-            repo_root: repo_root.to_path_buf(),
-            allowed,
-        }
+        Self { allowed }
     }
 
     /// Returns `true` if direnv is active and allowed for the repository root.
@@ -26,15 +22,9 @@ impl Direnv {
         self.allowed
     }
 
-    /// Returns the repository root path associated with this `Direnv` instance.
-    #[must_use]
-    pub fn repo_root(&self) -> &Path {
-        &self.repo_root
-    }
-
     /// Checks if a directory contains a `.envrc` or `.env` file.
     #[must_use]
-    pub fn has_envrc(dir: &Path) -> bool {
+    fn has_envrc(dir: &Path) -> bool {
         dir.join(".envrc").exists() || dir.join(".env").exists()
     }
 

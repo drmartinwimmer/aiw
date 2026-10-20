@@ -51,8 +51,9 @@ impl<'a> SandboxBuilder<'a> {
     }
 
     /// Explicit path to fence settings file (`fence.json` or `fence.jsonc`).
+    #[cfg(test)]
     #[must_use]
-    pub fn with_settings_path(mut self, settings_path: &'a Path) -> Self {
+    fn with_settings_path(mut self, settings_path: &'a Path) -> Self {
         self.settings_path = Some(settings_path);
         self
     }
@@ -64,16 +65,10 @@ impl<'a> SandboxBuilder<'a> {
         self
     }
 
-    /// Configures whether `direnv exec .` is prepended to the container payload command.
-    #[must_use]
-    pub fn with_use_direnv(self, use_direnv: bool) -> Self {
-        self.with_direnv(use_direnv)
-    }
-
     /// Overrides the shared configuration directory for test isolation.
     #[cfg(test)]
     #[must_use]
-    pub fn with_shared_config_dir(mut self, dir: PathBuf) -> Self {
+    fn with_shared_config_dir(mut self, dir: PathBuf) -> Self {
         self.shared_config_dir = Some(dir);
         self
     }
