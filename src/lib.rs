@@ -9,6 +9,7 @@ mod sandbox;
 mod workspace;
 
 pub(crate) mod tools;
+pub(crate) use tools::hc;
 pub(crate) use tools::herdr;
 pub(crate) mod vcs;
 

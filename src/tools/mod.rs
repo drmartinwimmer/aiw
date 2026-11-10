@@ -1,6 +1,7 @@
 pub(crate) mod direnv;
 pub(crate) mod fence;
 pub(crate) mod git;
+pub(crate) mod hc;
 pub(crate) mod herdr;
 pub(crate) mod jj;
 

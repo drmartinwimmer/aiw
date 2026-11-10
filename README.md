@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Built with Rust](https://img.shields.io/badge/rust-2024%20edition-orange.svg)](https://www.rust-lang.org/)
 
-**AI Workspace** (`aiw`) streamlines running autonomous AI coding agents (such as Google Antigravity / `agy`) in dedicated, secure, and isolated development environments. It pairs the isolated workflow of [Jujutsu (`jj`)](https://github.com/martinvonz/jj) workspaces and [Git](https://git-scm.com/) worktrees with OS-level containment powered by [Fence](https://github.com/fencesandbox/fence), automatic [direnv](https://direnv.net/) environment propagation, and seamless [Herdr](https://github.com/herdr/herdr) multiplexer integration.
+**AI Workspace** (`aiw`) streamlines running autonomous AI coding agents (such as Google Antigravity / `agy`) in dedicated, secure, and isolated development environments. It pairs the isolated workflow of [Jujutsu (`jj`)](https://github.com/martinvonz/jj) workspaces and [Git](https://git-scm.com/) worktrees with OS-level containment powered by [Fence](https://github.com/fencesandbox/fence), automatic [direnv](https://direnv.net/) environment propagation, and seamless `herdr-core` (`hc`) and [Herdr](https://github.com/herdr/herdr) multiplexer integration.
 
 ---
 
@@ -31,7 +31,7 @@ Running autonomous coding agents directly inside your primary working copy carri
 2. **Fence Sandbox Containment**: Executes the agent inside a sandbox powered by [Fence](https://github.com/fencesandbox/fence)—a lightweight, container-free sandbox tool that enforces network filtering and filesystem boundaries (backed by Bubblewrap and Landlock on Linux, and Seatbelt on macOS).
 3. **Safe Agent Autonomy**: Safely runs agents with execution permissions enabled inside the container (`--dangerously-skip-permissions`), providing full autonomous velocity while guaranteeing strict containment at the OS kernel level.
 4. **Automated `direnv` Support**: Automatically discovers and authorizes `.envrc` in newly spawned workspaces if the root repository has direnv active and allowed, prepending `direnv exec .` inside the sandbox.
-5. **Native `herdr` Integration**: If you run inside a [Herdr](https://github.com/herdr/herdr) terminal multiplexer session, `aiw` automatically creates workspace tabs, focuses them, and reports live agent states.
+5. **Native `herdr-core` (`hc`) & `herdr` Integration**: If you run inside a `herdr-core` (`hc`) or [Herdr](https://github.com/herdr/herdr) terminal multiplexer session, `aiw` automatically creates or attaches to workspace terminals/tabs and records workspace and agent metadata.
 
 ---
 
@@ -41,7 +41,7 @@ Running autonomous coding agents directly inside your primary working copy carri
 - **[Jujutsu (`jj`)](https://github.com/martinvonz/jj)** or **[Git](https://git-scm.com/)**: Version control system for workspace management (`aiw` automatically detects whether your project uses Jujutsu or Git)
 - **AI Agent CLI**: e.g., `agy` (Antigravity CLI)
 - _(Optional)_ **[direnv](https://direnv.net/)**: Directory-based environment variable management
-- _(Optional)_ **[Herdr](https://github.com/herdr/herdr)**: Terminal multiplexer with agent status reporting
+- _(Optional)_ **`herdr-core` (`hc`)** or **[Herdr](https://github.com/herdr/herdr)**: Terminal multiplexer with agent status and label support
 
 ---
 
@@ -103,7 +103,7 @@ This command:
 - Checks for an existing workspace named `feature-login` or provisions `.workspaces/feature-login` using `jj workspace add` (in Jujutsu repositories) or `git worktree add` (in Git repositories).
 - Authorizes and activates `direnv` if active in the repository root.
 - Wraps the agent inside `fence` using root or workspace settings.
-- Automatically handles tab creation and agent reporting if running inside Herdr.
+- Automatically handles terminal/tab creation, attachment, and agent metadata if running inside `herdr-core` (`hc`) or Herdr.
 
 ### 2. Dry Run Mode
 
@@ -232,9 +232,21 @@ If a repository requires project-specific settings (such as exposing an SDK or c
 
 ---
 
-## Multiplexer Integration (`Herdr`)
+## Multiplexer Integration (`herdr-core` & `Herdr`)
 
-`aiw` features built-in support for the [Herdr](https://github.com/herdr/herdr) terminal multiplexer:
+`aiw` features built-in support for both `herdr-core` (`hc`) and [Herdr](https://github.com/herdr/herdr):
+
+### `herdr-core` (`hc`)
+
+When running inside a `herdr-core` terminal (`HC_TERMINAL_ID` is set):
+
+- **Automatic Terminal Spawning & Attachment**: When executed outside the workspace terminal, `aiw` spawns an independent auto-removing background terminal (`hc run --bg --no-parent --rm`) named after the workspace, labels it (`source=aiw`, `agent=agy`, `workspace=<name>`), and attaches to it (`hc attach`). Detaching (`Ctrl+\`) leaves the sandboxed agent running in the background.
+- **Live Terminal Reattachment**: If a live terminal for the workspace already exists, `aiw` attaches directly to it instead of spawning a duplicate.
+- **In-Place Execution**: If already inside the workspace's terminal, `aiw` labels the terminal with agent metadata (`hc label`) and runs the sandbox directly in place.
+
+### `Herdr`
+
+When running inside a [Herdr](https://github.com/herdr/herdr) pane (`HERDR_ENV=1`):
 
 - **Automatic Tab Creation**: When executed outside the workspace tab, `aiw` opens a new tab labeled after the workspace and launches the sandbox inside it.
 - **Agent Lifecycle Reporting**: Reports `working` state directly to Herdr via `herdr pane report-agent`.

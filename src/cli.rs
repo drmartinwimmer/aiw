@@ -2,6 +2,7 @@ use std::path::Path;
 
 use crate::config::{ConfigInitError, ConfigInitializer};
 use crate::direnv::Direnv;
+use crate::hc::{Hc, HcError};
 use crate::herdr::{Herdr, HerdrError};
 use crate::sandbox::{SandboxBuilder, SandboxError};
 use crate::vcs::Vcs;
@@ -203,6 +204,10 @@ impl AgyCommand {
         if dry_run {
             println!("{builder}");
             Ok(())
+        } else if let Some(hc) = Hc::from_env() {
+            let cmd = format!("{builder}");
+            hc.run_command(&workspace_name, &cmd, "agy", Some(workspace.path()))?;
+            Ok(())
         } else if let Some(herdr) = Herdr::from_env() {
             let cmd = format!("{builder}");
             herdr.run_command(&workspace_name, &cmd, "agy", Some(workspace.path()))?;
@@ -324,6 +329,8 @@ pub enum AppError {
     Workspace(#[from] WorkspaceError),
     #[error("{0}")]
     Sandbox(#[from] SandboxError),
+    #[error("{0}")]
+    Hc(#[from] HcError),
     #[error("{0}")]
     Herdr(#[from] HerdrError),
     #[error("{0}")]
