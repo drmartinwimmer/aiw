@@ -14,7 +14,7 @@
 
 ### Enums
 
-- `pub enum AppError { Workspace(WorkspaceError), Sandbox(SandboxError), Herdr(HerdrError), Config(ConfigInitError), Io(std :: io :: Error) }`
+- `pub enum AppError { Workspace(WorkspaceError), Sandbox(SandboxError), Hc(HcError), Herdr(HerdrError), Config(ConfigInitError), Io(std :: io :: Error) }`
 - `pub enum ConfigInitError { AlreadyExists(PathBuf), UserConfigPathNotFound, Io(std :: io :: Error) }`
 - `pub enum SandboxError { FenceNotFound, InvalidArgOrder(String), ExecutionFailed(ExitStatus), Io(std :: io :: Error) }`
 - `pub enum WorkspaceError { NotInRepo, NotInJjRepo, NotInGitRepo, JjCommandFailed(String), GitCommandFailed(String), InvalidWorkspaceName(String), Io(std :: io :: Error) }`

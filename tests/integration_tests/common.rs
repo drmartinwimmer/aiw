@@ -135,15 +135,15 @@ pub fn write_test_fence_json(repo_root: &Path) {
 }
 
 pub fn run_aiw(cwd: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_aiw"))
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .expect("execute aiw binary")
+    run_aiw_with_env(cwd, &[], args)
 }
 
 pub fn run_aiw_with_env(cwd: &Path, envs: &[(&str, &str)], args: &[&str]) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_aiw"));
+    cmd.env_remove("HERDR_ENV")
+        .env_remove("HC_TERMINAL_ID")
+        .env_remove("HC_TERMINAL_SOCKET")
+        .env_remove("HC_SCOPE");
     for (k, v) in envs {
         cmd.env(k, v);
     }
