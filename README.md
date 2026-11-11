@@ -236,13 +236,14 @@ If a repository requires project-specific settings (such as exposing an SDK or c
 
 `aiw` features built-in support for both `herdr-core` (`hc`) and [Herdr](https://github.com/herdr/herdr):
 
-### `herdr-core` (`hc`)
+### `herdr-core` (`hc`) & Herdr Desktop Spaces
 
-When running inside a `herdr-core` terminal (`HC_TERMINAL_ID` is set):
+When running inside a `herdr-core` terminal (`HC_TERMINAL_ID` is set), including remote SSH servers connected to Herdr Desktop via `hc machine add`:
 
-- **Automatic Terminal Spawning & Attachment**: When executed outside the workspace terminal, `aiw` spawns an independent auto-removing background terminal (`hc run --bg --no-parent --rm`) named after the workspace, labels it (`source=aiw`, `agent=agy`, `workspace=<name>`), and attaches to it (`hc attach`). Detaching (`Ctrl+\`) leaves the sandboxed agent running in the background.
-- **Live Terminal Reattachment**: If a live terminal for the workspace already exists, `aiw` attaches directly to it instead of spawning a duplicate.
-- **In-Place Execution**: If already inside the workspace's terminal, `aiw` labels the terminal with agent metadata (`hc label`) and runs the sandbox directly in place.
+- **Herdr Space Tab Creation**: When executed inside a Herdr space (`herdr.space`), `aiw` spawns an independent auto-removing `hc` terminal (`hc run --bg --no-parent --rm --keep`) named after the workspace, labels it (`source=aiw`, `agent=agy`, `workspace=<name>`), and atomically adds a named `<workspace>` tab to the server's `"herdr-app"` layout document via `hc connect`—with no `herdr-app` binary required on the server. When the agent exits, the terminal and tab close automatically.
+- **Headless Terminal Attachment**: In plain headless `hc` sessions outside a Herdr space, `aiw` attaches directly to the workspace terminal (`hc attach`). Detaching (`Ctrl+\`) leaves the sandboxed agent running in the background.
+- **Live Terminal Reuse**: If a live terminal for the workspace already exists, `aiw` ensures its tab is present in the Herdr space (or reattaches to it in headless `hc`) instead of spawning a duplicate.
+- **In-Place Execution**: If already inside the workspace's terminal or a Herdr tab named after the workspace, `aiw` labels the terminal with agent metadata (`hc label`) and runs the sandbox directly in place.
 
 ### `Herdr`
 
