@@ -28,7 +28,7 @@
         };
         aiwPackage = rustPlatform.buildRustPackage {
           pname = "aiw";
-          version = "0.5.0"; # x-release-please-version
+          version = "0.6.0"; # x-release-please-version
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
           nativeCheckInputs = [
