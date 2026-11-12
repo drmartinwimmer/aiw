@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -25,14 +26,44 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+      - name: Checkout release PR branch
+        if: ${{ steps.release.outputs.pr }}
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          fetch-depth: 0
+
+      - name: Install Rust toolchain for PR sync
+        if: ${{ steps.release.outputs.pr }}
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install api-manifest for PR sync
+        if: ${{ steps.release.outputs.pr }}
+        run: cargo install api-manifest --locked
+
+      - name: Ensure Cargo.lock and API.md are updated
+        if: ${{ steps.release.outputs.pr }}
+        run: |
+          cargo check
+          if [ -f API.md ]; then
+            api-manifest dump
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet Cargo.lock Cargo.toml API.md; then
+            git add Cargo.lock Cargo.toml API.md
+            git commit -m "chore: sync Cargo.lock and API.md"
+            git push
+          fi
+
       - name: Checkout repository
-        if: ${{ steps.release.outputs.release_created == 'true' }}
+        if: ${{ steps.release.outputs.releases_created == 'true' || steps.release.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}
         uses: actions/checkout@v7
 
       - name: Install Rust toolchain
-        if: ${{ steps.release.outputs.release_created == 'true' }}
+        if: ${{ steps.release.outputs.releases_created == 'true' || steps.release.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}
         uses: dtolnay/rust-toolchain@stable
 
       - name: Publish to crates.io
-        if: ${{ steps.release.outputs.release_created == 'true' }}
+        if: ${{ steps.release.outputs.releases_created == 'true' || steps.release.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}
         run: cargo publish --token "${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}"
