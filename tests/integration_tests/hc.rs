@@ -245,7 +245,7 @@ fn aiw_in_herdr_space_runs_in_place_when_in_matching_tab() -> TestResult {
     let mock_fence = bin_dir.path().join("fence");
     std::fs::write(
         &mock_fence,
-        "#!/bin/sh\necho \"args=$*\" > .desktop_inplace_marker\n",
+        "#!/bin/sh\necho \"args=$* hc_id=$HC_TERMINAL_ID hc_sock=$HC_TERMINAL_SOCKET tmux=$TMUX\" > .desktop_inplace_marker\n",
     )?;
     std::fs::set_permissions(&mock_fence, std::fs::Permissions::from_mode(0o755))?;
     let orig_path = std::env::var("PATH").unwrap_or_default();
@@ -261,6 +261,8 @@ fn aiw_in_herdr_space_runs_in_place_when_in_matching_tab() -> TestResult {
         .env_remove("HERDR_ENV")
         .env("PATH", &test_path)
         .env("HC_TERMINAL_ID", "t6")
+        .env("HC_TERMINAL_SOCKET", "/tmp/secret-hc.sock")
+        .env("TMUX", "/tmp/tmux-1000/default,123,0")
         .env("HC_BIN_PATH", &mock_hc)
         .env("HC_MOCK_LOG", hc_log.path())
         .env("HC_MOCK_RPC_LOG", rpc_log.path())
@@ -277,10 +279,12 @@ fn aiw_in_herdr_space_runs_in_place_when_in_matching_tab() -> TestResult {
 
     let rpc_logged = std::fs::read_to_string(rpc_log.path())?;
     expect_that!(&rpc_logged, not(contains_substring("doc.set")));
+    let marker_path = repo.join(".workspaces/desktop-tab-ws/.desktop_inplace_marker");
+    expect_that!(marker_path.exists(), is_true());
+    let marker_content = std::fs::read_to_string(&marker_path)?;
     expect_that!(
-        repo.join(".workspaces/desktop-tab-ws/.desktop_inplace_marker")
-            .exists(),
-        is_true()
+        &marker_content,
+        contains_substring("hc_id= hc_sock= tmux=\n")
     );
     Ok(())
 }

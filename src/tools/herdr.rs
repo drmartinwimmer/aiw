@@ -59,15 +59,6 @@ enum HerdrPaneAction {
     },
 }
 
-#[derive(Command, Debug, Clone, PartialEq, Eq)]
-#[command(program = "sh", arg = "-c", ensure_user_path)]
-struct ShCommand {
-    #[command(current_dir)]
-    current_dir: Option<PathBuf>,
-
-    command: String,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum HerdrError {
     #[error("Not running inside Herdr (HERDR_ENV != 1)")]
@@ -413,38 +404,29 @@ impl Herdr {
         Ok(tab)
     }
 
-    fn execute_in_place(&self, command: &str, cwd: Option<&Path>) -> Result<(), HerdrError> {
-        ShCommand {
-            current_dir: cwd.map(Path::to_path_buf),
-            command: command.to_string(),
-        }
-        .run()
-        .map_err(|err| match err {
-            CommandError::ExecutionFailed { status, .. } => HerdrError::CommandFailed {
-                command: command.to_string(),
-                code: status.code(),
-                stderr: String::new(),
-            },
-            other => HerdrError::from(other),
-        })
-    }
-
     /// Takes a command, decides how to run it based on Herdr context, and executes it.
     ///
-    /// - If currently inside a tab named after `workspace_name`: informs Herdr about the agent on the current pane and executes the command in place.
-    /// - If not inside the workspace tab: creates a new tab named after `workspace_name`, informs Herdr about the agent, and executes the command in that tab.
-    pub fn run_command(
+    /// - If currently inside a tab named after `workspace_name`: informs Herdr about the agent on
+    ///   the current pane and executes `in_place` directly without shell round-tripping.
+    /// - If not inside the workspace tab: creates a new tab named after `workspace_name`, informs
+    ///   Herdr about the agent, and executes `command` in that tab.
+    pub(crate) fn run_with_in_place<F, E>(
         &self,
         workspace_name: &str,
         command: &str,
         agent: &str,
         cwd: Option<&Path>,
-    ) -> Result<(), HerdrError> {
+        in_place: F,
+    ) -> Result<(), E>
+    where
+        F: FnOnce() -> Result<(), E>,
+        E: From<HerdrError>,
+    {
         if self.is_current_tab_named(workspace_name) {
             if let Some(pane_id) = self.pane_id() {
                 self.inform_agent(pane_id, agent)?;
             }
-            self.execute_in_place(command, cwd)
+            in_place()
         } else {
             self.open_workspace_tab_and_execute(workspace_name, command, agent, cwd)?;
             Ok(())
@@ -629,26 +611,36 @@ mod tests {
     }
 
     #[googletest::test]
-    fn run_command_decides_to_create_tab_when_not_in_workspace_tab() -> TestResult {
+    fn run_with_in_place_decides_to_create_tab_when_not_in_workspace_tab() {
         let herdr = Herdr::mock().with_tab_id("w1:t1");
+        let mut ran_in_place = false;
 
-        let res = herdr.run_command(
+        let res = herdr.run_with_in_place::<_, HerdrError>(
             "ws-test",
             "fence -- echo 1",
             "agy",
             Some(Path::new("/tmp/test")),
+            || {
+                ran_in_place = true;
+                Ok(())
+            },
         );
         expect_that!(res, ok(anything()));
-        Ok(())
+        expect_that!(ran_in_place, is_false());
     }
 
     #[googletest::test]
-    fn run_command_decides_to_run_in_place_when_already_in_workspace_tab() -> TestResult {
+    fn run_with_in_place_decides_to_run_closure_when_already_in_workspace_tab() {
         let herdr = Herdr::mock().with_tab_id("w1:t5").with_pane_id("w1:p5");
+        let mut ran_in_place = false;
 
-        let res = herdr.run_command("ws-current", "true", "agy", None);
+        let res =
+            herdr.run_with_in_place::<_, HerdrError>("ws-current", "true", "agy", None, || {
+                ran_in_place = true;
+                Ok(())
+            });
         expect_that!(res, ok(anything()));
-        Ok(())
+        expect_that!(ran_in_place, is_true());
     }
 
     #[googletest::test]

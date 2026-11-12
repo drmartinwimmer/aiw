@@ -200,18 +200,23 @@ impl AgyCommand {
         let payload = self.build_payload_command();
         let builder =
             SandboxBuilder::for_workspace(&workspace, &payload).with_direnv(direnv.is_allowed());
+        if !builder.has_settings() {
+            drop(ConfigInitializer::ensure_user_config());
+        }
 
         if dry_run {
             println!("{builder}");
             Ok(())
         } else if let Some(hc) = Hc::from_env() {
             let cmd = format!("{builder}");
-            hc.run_command(&workspace_name, &cmd, "agy", Some(workspace.path()))?;
-            Ok(())
+            hc.run_with_in_place(&workspace_name, &cmd, "agy", Some(workspace.path()), || {
+                Ok(builder.run()?)
+            })
         } else if let Some(herdr) = Herdr::from_env() {
             let cmd = format!("{builder}");
-            herdr.run_command(&workspace_name, &cmd, "agy", Some(workspace.path()))?;
-            Ok(())
+            herdr.run_with_in_place(&workspace_name, &cmd, "agy", Some(workspace.path()), || {
+                Ok(builder.run()?)
+            })
         } else {
             builder.run()?;
             Ok(())
