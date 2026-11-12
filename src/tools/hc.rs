@@ -1,3 +1,4 @@
+use super::hc_doc::{self, HerdrAppDoc};
 use clapback::{Command, CommandError, CommandExt as _};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -31,8 +32,16 @@ enum HcSubcommand {
         labels: Vec<String>,
     },
 
+    #[command(name = "keep", arg = "--json")]
+    Keep {
+        terminal: String,
+    },
+
     #[command(name = "run", args = ["--json", "--bg", "--no-parent", "--rm"])]
     Run {
+        #[arg(long)]
+        keep: bool,
+
         #[arg(long)]
         name: Option<String>,
 
@@ -141,7 +150,16 @@ struct HcErrorPayload {
     message: String,
 }
 
-/// Interface for interacting with a `herdr-core` (`hc`) terminal session.
+#[derive(Debug)]
+struct HerdrSpaceContext {
+    space_id: String,
+    tab_id: Option<String>,
+    tab_name: Option<String>,
+    doc: Option<HerdrAppDoc>,
+}
+
+/// Interface for interacting with a `herdr-core` (`hc`) terminal session, including
+/// remote and local Herdr Desktop spaces synchronized through `hc`'s `"herdr-app"` document.
 #[derive(Debug)]
 pub(crate) struct Hc {
     binary: PathBuf,
@@ -252,9 +270,58 @@ impl Hc {
         Ok(serde_json::from_str(&stdout)?)
     }
 
+    /// Resolves the enclosing Herdr Desktop space and tab context from the local `hc` daemon
+    /// when the caller terminal belongs to a Herdr space (including remote spaces connected
+    /// via `hc machine add`), returning `None` in plain headless `hc` sessions.
     #[must_use]
-    fn is_current_terminal_for_workspace(&self, workspace_name: &str) -> bool {
-        let Ok(term) = self.get_terminal(&self.terminal_id) else {
+    fn herdr_space_context(&self, caller: Option<&TerminalInfo>) -> Option<HerdrSpaceContext> {
+        let caller = caller?;
+        let space_hint = caller
+            .labels
+            .get("herdr.space")
+            .map(String::as_str)
+            .filter(|s| !s.is_empty());
+        let tab_hint = caller
+            .labels
+            .get("herdr.tab")
+            .map(String::as_str)
+            .filter(|s| !s.is_empty());
+        let has_where = caller
+            .labels
+            .get("where")
+            .is_some_and(|place| !place.is_empty());
+
+        if space_hint.is_none() && !has_where {
+            return None;
+        }
+
+        let doc = hc_doc::get_doc(&self.binary).ok().map(|snap| snap.doc);
+        if let Some(ref d) = doc
+            && let Some(loc) = d.locate_terminal(&self.terminal_id, space_hint, tab_hint)
+        {
+            return Some(HerdrSpaceContext {
+                space_id: loc.space_id,
+                tab_id: loc.tab_id,
+                tab_name: loc.tab_name,
+                doc,
+            });
+        }
+
+        space_hint.map(|space_id| HerdrSpaceContext {
+            space_id: space_id.to_owned(),
+            tab_id: tab_hint.map(str::to_owned),
+            tab_name: None,
+            doc,
+        })
+    }
+
+    #[must_use]
+    fn is_caller_for_workspace(
+        caller: Option<&TerminalInfo>,
+        current_tab_name: Option<&str>,
+        workspace_name: &str,
+    ) -> bool {
+        let Some(term) = caller else {
             return false;
         };
 
@@ -263,9 +330,15 @@ impl Hc {
         }
 
         let sanitized = Self::terminal_name(workspace_name);
-        term.name
+        if term
+            .name
             .as_deref()
             .is_some_and(|name| name == workspace_name || name == sanitized)
+        {
+            return true;
+        }
+
+        current_tab_name.is_some_and(|tab_name| tab_name == workspace_name)
     }
 
     fn find_live_workspace_terminal(
@@ -330,12 +403,23 @@ impl Hc {
         Ok(())
     }
 
+    fn keep_terminal(&self, terminal: &str) -> Result<(), HcError> {
+        match self.execute_cmd(HcSubcommand::Keep {
+            terminal: terminal.to_string(),
+        }) {
+            Ok(_) => Ok(()),
+            Err(HcError::Api { ref kind, .. }) if kind == "not_found" => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
+
     fn create_terminal(
         &self,
         workspace_name: &str,
         command: &str,
         agent: &str,
         cwd: Option<&Path>,
+        keep: bool,
     ) -> Result<String, HcError> {
         let candidate_name = Self::terminal_name(workspace_name);
         let name = if self.is_terminal_name_available(&candidate_name, workspace_name)? {
@@ -345,6 +429,7 @@ impl Hc {
         };
 
         let stdout = self.execute_cmd(HcSubcommand::Run {
+            keep,
             name,
             cwd: cwd.map(Path::to_path_buf),
             label: vec![
@@ -356,6 +441,56 @@ impl Hc {
         })?;
         let resp: HcRunResponse = serde_json::from_str(&stdout)?;
         Ok(resp.address)
+    }
+
+    /// Places `terminal` as a named `<workspace_name>` tab inside `space_ctx.space_id` via `hc`'s
+    /// `"herdr-app"` shared layout document, falling back to `herdr.space` / `herdr.tab` labels
+    /// if the space has not yet been written to `"herdr-app"`.
+    fn place_terminal_in_herdr_space(
+        &self,
+        space_ctx: &HerdrSpaceContext,
+        workspace_name: &str,
+        terminal: &str,
+        ensure_keep: bool,
+    ) -> Result<(), HcError> {
+        if space_ctx
+            .doc
+            .as_ref()
+            .is_some_and(|d| d.contains_terminal(terminal))
+        {
+            return Ok(());
+        }
+
+        if ensure_keep {
+            self.keep_terminal(terminal)?;
+        }
+
+        let new_tab_id = hc_doc::fresh_id("tb");
+        let added = hc_doc::add_terminal_tab(
+            &self.binary,
+            &space_ctx.space_id,
+            space_ctx.tab_id.as_deref(),
+            &new_tab_id,
+            workspace_name,
+            terminal,
+        )?;
+
+        if !added {
+            let label_res = self.execute_cmd(HcSubcommand::Label {
+                terminal: terminal.to_string(),
+                labels: vec![
+                    format!("herdr.space={}", space_ctx.space_id),
+                    format!("herdr.tab={new_tab_id}"),
+                ],
+            });
+            match label_res {
+                Ok(_) => {}
+                Err(HcError::Api { ref kind, .. }) if kind == "not_found" => {}
+                Err(err) => return Err(err),
+            }
+        }
+
+        Ok(())
     }
 
     fn attach_terminal(&self, terminal: &str) -> Result<(), HcError> {
@@ -404,11 +539,16 @@ impl Hc {
         })
     }
 
-    /// Decides how to run `command` based on the current `herdr-core` context and executes it:
+    /// Decides how to run `command` based on the current `herdr-core` / Herdr space context
+    /// and executes it:
     ///
-    /// - If already inside the terminal for `workspace_name`: labels the terminal with agent metadata and runs `command` in place.
-    /// - If another live terminal for `workspace_name` already exists: attaches to it.
-    /// - Otherwise: spawns a new independent `--rm` terminal named after `workspace_name` and attaches to it.
+    /// - If already inside the terminal or Herdr tab for `workspace_name`: labels the terminal
+    ///   with agent metadata and runs `command` in place.
+    /// - If another live terminal for `workspace_name` already exists: ensures it has a tab in
+    ///   the current Herdr space when inside one, or attaches to it in headless `hc`.
+    /// - Otherwise: spawns a new independent `--rm` terminal named after `workspace_name` and
+    ///   adds it as a named tab in the Herdr space's `"herdr-app"` layout document (or attaches
+    ///   to it in headless `hc`).
     pub(crate) fn run_command(
         &self,
         workspace_name: &str,
@@ -416,13 +556,24 @@ impl Hc {
         agent: &str,
         cwd: Option<&Path>,
     ) -> Result<(), HcError> {
-        if self.is_current_terminal_for_workspace(workspace_name) {
+        let caller = self.get_terminal(&self.terminal_id).ok();
+        let space_ctx = self.herdr_space_context(caller.as_ref());
+        let current_tab_name = space_ctx.as_ref().and_then(|ctx| ctx.tab_name.as_deref());
+
+        if Self::is_caller_for_workspace(caller.as_ref(), current_tab_name, workspace_name) {
             self.inform_agent(&self.terminal_id, workspace_name, agent)?;
             self.execute_in_place(command, cwd)
         } else if let Some(existing_address) = self.find_live_workspace_terminal(workspace_name)? {
-            self.attach_terminal(&existing_address)
+            if let Some(ref ctx) = space_ctx {
+                self.place_terminal_in_herdr_space(ctx, workspace_name, &existing_address, true)
+            } else {
+                self.attach_terminal(&existing_address)
+            }
+        } else if let Some(ref ctx) = space_ctx {
+            let address = self.create_terminal(workspace_name, command, agent, cwd, true)?;
+            self.place_terminal_in_herdr_space(ctx, workspace_name, &address, false)
         } else {
-            let address = self.create_terminal(workspace_name, command, agent, cwd)?;
+            let address = self.create_terminal(workspace_name, command, agent, cwd, false)?;
             self.attach_spawned_terminal(&address)
         }
     }
@@ -436,8 +587,9 @@ mod tests {
     type TestResult = Result<(), Box<dyn std::error::Error>>;
 
     fn mock_hc(terminal_id: &str) -> Hc {
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
         Hc {
-            binary: Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mock_hc.sh"),
+            binary: manifest_dir.join("tests/fixtures/mock_hc.sh"),
             terminal_id: terminal_id.to_string(),
         }
     }
@@ -465,35 +617,60 @@ mod tests {
             "fence -- echo 1",
             "agy",
             Some(Path::new("/my/cwd")),
+            false,
         )?;
         expect_that!(&address, eq("t8"));
 
-        let reused_address = hc.create_terminal("finished-ws", "fence -- echo 1", "agy", None)?;
+        let reused_address =
+            hc.create_terminal("finished-ws", "fence -- echo 1", "agy", None, false)?;
         expect_that!(&reused_address, eq("t14"));
         Ok(())
     }
 
     #[googletest::test]
-    fn is_current_terminal_for_workspace_checks_name_and_label() {
+    fn is_caller_for_workspace_checks_label_terminal_name_and_herdr_tab_name() -> TestResult {
         let hc_by_name = mock_hc("t3");
+        let caller_t3 = hc_by_name.get_terminal("t3")?;
         expect_that!(
-            hc_by_name.is_current_terminal_for_workspace("feature-branch"),
+            Hc::is_caller_for_workspace(Some(&caller_t3), None, "feature-branch"),
             is_true()
         );
         expect_that!(
-            hc_by_name.is_current_terminal_for_workspace("different-branch"),
+            Hc::is_caller_for_workspace(Some(&caller_t3), None, "different-branch"),
             is_false()
         );
 
         let hc_by_label = mock_hc("t5");
+        let caller_t5 = hc_by_label.get_terminal("t5")?;
         expect_that!(
-            hc_by_label.is_current_terminal_for_workspace("ws-current"),
+            Hc::is_caller_for_workspace(Some(&caller_t5), Some("renamed-tab"), "ws-current"),
             is_true()
         );
+        expect_that!(
+            Hc::is_caller_for_workspace(Some(&caller_t5), Some("renamed-tab"), "renamed-tab"),
+            is_false()
+        );
+
+        let hc_space = mock_hc("t6");
+        let caller_t6 = hc_space.get_terminal("t6")?;
+        let space_ctx = hc_space.herdr_space_context(Some(&caller_t6));
+        expect_that!(space_ctx, some(anything()));
+        if let Some(ctx) = space_ctx {
+            expect_that!(ctx.tab_name.as_deref(), some(eq("desktop-tab-ws")));
+            expect_that!(
+                Hc::is_caller_for_workspace(
+                    Some(&caller_t6),
+                    ctx.tab_name.as_deref(),
+                    "desktop-tab-ws"
+                ),
+                is_true()
+            );
+        }
+        Ok(())
     }
 
     #[googletest::test]
-    fn run_command_creates_and_attaches_when_not_in_workspace_terminal() -> TestResult {
+    fn run_command_creates_and_attaches_when_headless() -> TestResult {
         let hc = mock_hc("t1");
         let res = hc.run_command(
             "ws-test",
@@ -506,7 +683,36 @@ mod tests {
     }
 
     #[googletest::test]
-    fn run_command_attaches_to_existing_live_terminal_when_present() -> TestResult {
+    fn run_command_opens_tab_in_herdr_space_doc_when_inside_herdr_space() -> TestResult {
+        let hc = mock_hc("t2");
+        let res = hc.run_command(
+            "ws-test",
+            "fence -- echo 1",
+            "agy",
+            Some(Path::new("/tmp/test")),
+        );
+        expect_that!(res, ok(anything()));
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn run_command_places_existing_terminal_in_herdr_space_doc() -> TestResult {
+        let hc = mock_hc("t2");
+        let res = hc.run_command("existing-ws", "fence -- echo 1", "agy", None);
+        expect_that!(res, ok(anything()));
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn run_command_runs_in_place_when_in_matching_herdr_space_tab() -> TestResult {
+        let hc = mock_hc("t6");
+        let res = hc.run_command("desktop-tab-ws", "true", "agy", None);
+        expect_that!(res, ok(anything()));
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn run_command_attaches_to_existing_live_terminal_when_headless() -> TestResult {
         let hc = mock_hc("t1");
         let res = hc.run_command("existing-ws", "fence -- echo 1", "agy", None);
         expect_that!(res, ok(anything()));
