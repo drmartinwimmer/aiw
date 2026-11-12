@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0](https://github.com/drmartinwimmer/aiw/compare/ai-workspace-v0.5.0...ai-workspace-v0.6.0) (2026-11-12)
+
+
+### Features
+
+* add herdr-core (hc) environment integration ([#41](https://github.com/drmartinwimmer/aiw/issues/41)) ([c5c857e](https://github.com/drmartinwimmer/aiw/commit/c5c857e9bfbe090e16900243dbbeeac39584f158))
+
+
+### Bug Fixes
+
+* open workspace tabs in Herdr spaces via hc layout document ([#44](https://github.com/drmartinwimmer/aiw/issues/44)) ([db43446](https://github.com/drmartinwimmer/aiw/commit/db43446f1d0cd5325733e63cb6c2001e44814ad1))
+* sync API.md on release PRs and track package version in flake.nix ([#45](https://github.com/drmartinwimmer/aiw/issues/45)) ([c47eb66](https://github.com/drmartinwimmer/aiw/commit/c47eb6634351556e3363c100a213cff0e8beda12))
+
 ## [0.5.0](https://github.com/drmartinwimmer/aiw/compare/ai-workspace-v0.4.0...ai-workspace-v0.5.0) (2026-10-17)
 
 
