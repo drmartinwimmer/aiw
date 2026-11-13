@@ -622,3 +622,39 @@ fn aiw_in_live_hc_herdr_space_creates_named_tab_in_doc() -> TestResult {
 
     Ok(())
 }
+
+#[googletest::test]
+fn aiw_in_hc_with_fence_false_runs_agent_without_fence_or_permissive_flag() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let repo = dir.path();
+    init_test_jj_repo(repo);
+    write_test_fence_json(repo);
+
+    let log_file = NamedTempFile::new()?;
+    let mock_hc = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mock_hc.sh");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_aiw"))
+        .args(["--fence", "false", "agy", "my-fenceless-hc-ws"])
+        .current_dir(repo)
+        .env_remove("HERDR_ENV")
+        .env("HC_TERMINAL_ID", "t1")
+        .env("HC_BIN_PATH", &mock_hc)
+        .env("HC_MOCK_LOG", log_file.path())
+        .output()?;
+
+    expect_that!(output.status.success(), is_true());
+    let logged = std::fs::read_to_string(log_file.path())?;
+    expect_that!(
+        &logged,
+        contains_substring(
+            "--label source=aiw --label agent=agy --label workspace=my-fenceless-hc-ws agy"
+        )
+    );
+    expect_that!(&logged, not(contains_substring("fence ")));
+    expect_that!(
+        &logged,
+        not(contains_substring("--dangerously-skip-permissions"))
+    );
+    expect_that!(&logged, contains_substring("attach t10"));
+    Ok(())
+}

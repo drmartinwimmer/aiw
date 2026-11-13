@@ -28,11 +28,12 @@
 - `pub fn Direnv::is_allowed(& self) -> bool` — _Returns `true` if direnv is active and allowed for the repository root._
 - `pub fn Direnv::is_dir_allowed(dir: & Path) -> bool` — _Checks if `direnv` is allowed in the specified directory by inspecting `direnv status`._
 - `pub fn Direnv::new(repo_root: & Path) -> Self` — _Inspects the given repository root once and determines whether direnv is active and allowed._
-- `pub fn SandboxBuilder < 'a >::build_command(& self) -> Result < Command , SandboxError >` — _Builds the `std::process::Command` prepared to execute fence._
+- `pub fn SandboxBuilder < 'a >::build_command(& self) -> Result < Command , SandboxError >` — _Builds the `std::process::Command` prepared to execute fence (or the direct payload when fence is disabled)._
 - `pub fn SandboxBuilder < 'a >::for_workspace(workspace: & 'a Workspace, command: & 'a [String]) -> Self` — _Creates a new `SandboxBuilder` configured for the given `Workspace` and required payload command._
 - `pub fn SandboxBuilder < 'a >::new(workspace_path: & 'a Path, repo_root: & 'a Path, command: & 'a [String]) -> Self` — _Creates a new `SandboxBuilder` for the specified workspace, repository root, and required payload command._
-- `pub fn SandboxBuilder < 'a >::run(& self) -> Result < () , SandboxError >` — _Executes fence synchronously, forwarding standard I/O._
+- `pub fn SandboxBuilder < 'a >::run(& self) -> Result < () , SandboxError >` — _Executes fence (or the direct payload when fence is disabled) synchronously, forwarding standard I/O._
 - `pub fn SandboxBuilder < 'a >::with_direnv(mut self, use_direnv: bool) -> Self` — _Configures whether `direnv exec .` is prepended to the container payload command._
+- `pub fn SandboxBuilder < 'a >::with_fence(mut self, fence: bool) -> Self` — _Configures whether the payload command is wrapped inside `fence` (defaults to `true`)._
 - `pub fn Workspace::ensure(& self) -> Result < bool , WorkspaceError >` — _Ensures the workspace exists on disk and is registered in the underlying VCS._
 - `pub fn Workspace::exists(& self) -> bool` — _Returns `true` if the workspace currently exists on disk and contains appropriate VCS metadata._
 - `pub fn Workspace::forget(& self) -> Result < () , WorkspaceError >` — _Forgets the workspace in the underlying VCS and removes the workspace directory from disk._
@@ -50,6 +51,10 @@
 
 AI Workspace Launcher
 
+| Flag / Argument | Type | Required | Default | Description                                                   |
+| --------------- | ---- | -------- | ------- | ------------------------------------------------------------- |
+| `--fence`       | `-`  | No       | `true`  | Run agent inside a Fence sandbox with permissive mode enabled |
+
 **Subcommands:**
 
 - `agy`
@@ -64,7 +69,7 @@ Launch agy in an isolated Fence sandbox for a workspace
 
 | Flag / Argument    | Type             | Required | Default | Description                                       |
 | ------------------ | ---------------- | -------- | ------- | ------------------------------------------------- |
-| `--dry-run`        | `-`              | No       | `-`     | Print generated Fence command without executing   |
+| `--dry-run`        | `-`              | No       | `-`     | Print generated command without executing         |
 | `<EXTRA-ARGS>`     | `EXTRA_ARGS`     | Yes      | `-`     | Extra arguments forwarded directly to agy         |
 | `<WORKSPACE-NAME>` | `WORKSPACE_NAME` | Yes      | `-`     | Workspace name under .workspaces/<workspace-name> |
 

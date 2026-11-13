@@ -105,7 +105,8 @@ case "$args" in
         exit 0
         ;;
     "run --json --bg --no-parent --rm --name my-hc-ws --cwd "*" --label source=aiw --label agent=agy --label workspace=my-hc-ws "* | \
-    "run --json --bg --no-parent --rm --keep --name my-hc-ws --cwd "*" --label source=aiw --label agent=agy --label workspace=my-hc-ws "*)
+    "run --json --bg --no-parent --rm --keep --name my-hc-ws --cwd "*" --label source=aiw --label agent=agy --label workspace=my-hc-ws "* | \
+    "run --json --bg --no-parent --rm --name my-fenceless-hc-ws --cwd "*" --label source=aiw --label agent=agy --label workspace=my-fenceless-hc-ws "*)
         echo '{"address":"t10","agent":"fence","cwd":"/repo/.workspaces/my-hc-ws","name":"my-hc-ws","state":"live","turn":0}'
         exit 0
         ;;

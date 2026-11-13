@@ -14,6 +14,10 @@ use clapback::Command;
 #[derive(Parser, Debug)]
 #[command(name = "aiw", about = "AI Workspace Launcher")]
 pub struct Cli {
+    /// Run agent inside a Fence sandbox with permissive mode enabled
+    #[arg(long, global = true, default_value_t = true, action = clap::ArgAction::Set)]
+    fence: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -21,7 +25,7 @@ pub struct Cli {
 impl Cli {
     pub fn run() -> Result<(), AppError> {
         let cli = Self::parse();
-        cli.command.run()
+        cli.command.run(cli.fence)
     }
 }
 
@@ -41,9 +45,9 @@ enum Commands {
 }
 
 impl Commands {
-    fn run(self) -> Result<(), AppError> {
+    fn run(self, fence: bool) -> Result<(), AppError> {
         match self {
-            Commands::Agy(cmd) => cmd.run(),
+            Commands::Agy(cmd) => cmd.run(fence),
             Commands::Forget(cmd) => cmd.run(),
             Commands::Config(cmd) => cmd.run(),
             Commands::List(cmd) => cmd.run(),
@@ -148,7 +152,7 @@ struct AgyCommand {
     #[arg(add = clap_complete::engine::ArgValueCompleter::new(complete_workspaces))]
     workspace_name: String,
 
-    /// Print generated Fence command without executing
+    /// Print generated command without executing
     #[arg(long)]
     dry_run: bool,
 
@@ -168,11 +172,12 @@ struct AgyPayloadCommand {
 }
 
 impl AgyCommand {
-    fn build_payload_command(self) -> Vec<String> {
-        let dangerously_skip_permissions = !self
-            .extra_args
-            .iter()
-            .any(|a| a == "--dangerously-skip-permissions");
+    fn build_payload_command(self, fence: bool) -> Vec<String> {
+        let dangerously_skip_permissions = fence
+            && !self
+                .extra_args
+                .iter()
+                .any(|a| a == "--dangerously-skip-permissions");
         AgyPayloadCommand {
             dangerously_skip_permissions,
             extra_args: self.extra_args,
@@ -183,7 +188,7 @@ impl AgyCommand {
         .collect()
     }
 
-    fn run(self) -> Result<(), AppError> {
+    fn run(self, fence: bool) -> Result<(), AppError> {
         let current_dir = std::env::current_dir()?;
         let workspace = Workspace::from_dir(&current_dir, &self.workspace_name)?;
         let repo_root = workspace.repo_root();
@@ -197,10 +202,11 @@ impl AgyCommand {
 
         let dry_run = self.dry_run;
         let workspace_name = self.workspace_name.clone();
-        let payload = self.build_payload_command();
-        let builder =
-            SandboxBuilder::for_workspace(&workspace, &payload).with_direnv(direnv.is_allowed());
-        if !builder.has_settings() {
+        let payload = self.build_payload_command(fence);
+        let builder = SandboxBuilder::for_workspace(&workspace, &payload)
+            .with_direnv(direnv.is_allowed())
+            .with_fence(fence);
+        if fence && !builder.has_settings() {
             drop(ConfigInitializer::ensure_user_config());
         }
 
@@ -354,6 +360,7 @@ mod tests {
     #[googletest::test]
     fn parse_agy_subcommand_minimal_succeeds() -> TestResult {
         let cli = Cli::try_parse_from(["aiw", "agy", "my-workspace"])?;
+        expect_that!(cli.fence, is_true());
         if let Commands::Agy(cmd) = cli.command {
             expect_that!(&cmd.workspace_name, eq("my-workspace"));
             expect_that!(cmd.dry_run, is_false());
@@ -362,6 +369,92 @@ mod tests {
             expect_that!(false, is_true());
         }
         Ok(())
+    }
+
+    #[googletest::test]
+    fn parse_global_fence_flag_in_all_positions_succeeds() -> TestResult {
+        for (argv, expected_fence) in [
+            (
+                vec!["aiw", "--fence", "false", "agy", "my-workspace"],
+                false,
+            ),
+            (vec!["aiw", "--fence=false", "agy", "my-workspace"], false),
+            (
+                vec!["aiw", "agy", "--fence", "false", "my-workspace"],
+                false,
+            ),
+            (vec!["aiw", "agy", "--fence=false", "my-workspace"], false),
+            (
+                vec!["aiw", "agy", "my-workspace", "--fence", "false"],
+                false,
+            ),
+            (vec!["aiw", "agy", "my-workspace", "--fence=false"], false),
+            (vec!["aiw", "--fence", "true", "agy", "my-workspace"], true),
+            (vec!["aiw", "agy", "my-workspace", "--fence=true"], true),
+        ] {
+            let cli = Cli::try_parse_from(argv)?;
+            expect_that!(cli.fence, eq(expected_fence));
+            if let Commands::Agy(cmd) = cli.command {
+                expect_that!(&cmd.workspace_name, eq("my-workspace"));
+                expect_that!(&cmd.extra_args, is_empty());
+            } else {
+                expect_that!(false, is_true());
+            }
+        }
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn parse_fence_after_double_dash_forwards_to_extra_args() -> TestResult {
+        let cli = Cli::try_parse_from(["aiw", "agy", "my-workspace", "--", "--fence", "false"])?;
+        expect_that!(cli.fence, is_true());
+        if let Commands::Agy(cmd) = cli.command {
+            expect_that!(&cmd.extra_args, elements_are![eq("--fence"), eq("false")]);
+        } else {
+            expect_that!(false, is_true());
+        }
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn build_payload_command_omits_permissive_flag_when_fence_is_false() {
+        let fenced = AgyCommand {
+            workspace_name: "ws".to_string(),
+            dry_run: false,
+            extra_args: vec!["--model".to_string(), "gemini-2.5".to_string()],
+        }
+        .build_payload_command(true);
+        expect_that!(
+            &fenced,
+            elements_are![
+                eq("agy"),
+                eq("--dangerously-skip-permissions"),
+                eq("--model"),
+                eq("gemini-2.5")
+            ]
+        );
+
+        let fenceless = AgyCommand {
+            workspace_name: "ws".to_string(),
+            dry_run: false,
+            extra_args: vec!["--model".to_string(), "gemini-2.5".to_string()],
+        }
+        .build_payload_command(false);
+        expect_that!(
+            &fenceless,
+            elements_are![eq("agy"), eq("--model"), eq("gemini-2.5")]
+        );
+
+        let fenceless_explicit_skip = AgyCommand {
+            workspace_name: "ws".to_string(),
+            dry_run: false,
+            extra_args: vec!["--dangerously-skip-permissions".to_string()],
+        }
+        .build_payload_command(false);
+        expect_that!(
+            &fenceless_explicit_skip,
+            elements_are![eq("agy"), eq("--dangerously-skip-permissions")]
+        );
     }
 
     #[googletest::test]

@@ -68,3 +68,38 @@ fn aiw_in_herdr_with_dry_run_does_not_call_herdr() -> TestResult {
     expect_that!(&logged, eq(""));
     Ok(())
 }
+
+#[googletest::test]
+fn aiw_in_herdr_with_fence_false_runs_agent_without_fence_or_permissive_flag() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let repo = dir.path();
+    init_test_jj_repo(repo);
+    write_test_fence_json(repo);
+
+    let log_file = NamedTempFile::new()?;
+    let mock_herdr = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mock_herdr.sh");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_aiw"))
+        .args(["--fence", "false", "agy", "my-fenceless-herdr-ws"])
+        .current_dir(repo)
+        .env_remove("HC_TERMINAL_ID")
+        .env("HERDR_ENV", "1")
+        .env("HERDR_BIN_PATH", &mock_herdr)
+        .env("HERDR_WORKSPACE_ID", "w1")
+        .env("HERDR_MOCK_LOG", log_file.path())
+        .output()?;
+
+    expect_that!(output.status.success(), is_true());
+    let logged = std::fs::read_to_string(log_file.path())?;
+    expect_that!(
+        &logged,
+        contains_substring("tab create --label my-fenceless-herdr-ws --focus")
+    );
+    expect_that!(&logged, contains_substring("pane run w1:p10 agy; exit"));
+    expect_that!(&logged, not(contains_substring("fence ")));
+    expect_that!(
+        &logged,
+        not(contains_substring("--dangerously-skip-permissions"))
+    );
+    Ok(())
+}
