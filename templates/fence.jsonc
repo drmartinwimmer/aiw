@@ -1,64 +1,209 @@
 {
   "$schema": "https://raw.githubusercontent.com/fencesandbox/fence/main/docs/schema/fence.schema.json",
 
+  // Enable pseudo-terminal allocation for interactive TUI coding agents (agy).
+  "allowPty": true,
+
   "command": {
     // Silences Fence runtime execution deny warning on systems with multi-call
     // coreutils binaries (e.g. NixOS or Busybox). On these systems, chroot shares
     // an inode/binary with essential utilities like cat, head, and tail; denying
     // chroot at runtime would collaterally block those essential utilities.
     "acceptSharedBinaryCannotRuntimeDeny": ["chroot"],
+
+    // Enforce Fence's baseline dangerous system binary blocks (mkfs, fdisk, kmod,
+    // kexec, mount, umount, nsenter, unshare, systemctl, etc.).
+    "useDefaults": true,
+
+    // Block privilege escalation, host terminal multiplexer CLIs (preventing sandbox
+    // escape via host pane IPC), package publishing, and destructive GitHub repo/auth
+    // administration, while permitting git/jj push and gh PR/issue/Actions workflows.
+    "deny": [
+      "cargo publish",
+      "doas",
+      "gem push",
+      "gh auth login",
+      "gh auth logout",
+      "gh gpg-key",
+      "gh release delete",
+      "gh repo archive",
+      "gh repo delete",
+      "gh secret delete",
+      "gh secret set",
+      "gh ssh-key",
+      "gh variable delete",
+      "gh variable set",
+      "hc",
+      "herdr",
+      "npm publish",
+      "pnpm publish",
+      "su",
+      "sudo",
+      "tmux",
+      "twine upload",
+      "yarn publish",
+      "zellij",
+    ],
   },
 
-  // Inherit Fence's "code" template, providing baseline permissions for AI coding
-  // agents (standard package registries, public git, LLM APIs, and command safety).
-  "extends": "code",
-
+  // Standalone default-deny-read policy rather than extending Fence's "code" or
+  // "code-strict" templates, avoiding additive inheritance of broad host writes
+  // (~/.config/**, ~/.local/share/**) and third-party exfiltration wildcards.
   "filesystem": {
-    // Read permissions beyond standard FHS system paths.
-    // On NixOS and systems using Nix, executables (like bash and agy), shared libraries,
-    // and the dynamic linker reside under /nix/store. Fence's Landlock supervisor
-    // restricts unlisted paths by default, so /nix must be explicitly readable.
-    "allowRead": ["/nix"],
+    "defaultDenyRead": true,
+
+    "allowRead": [
+      // Active workspace and enclosing repository root (read-only outside .workspaces/<name>)
+      ".",
+      "../..",
+
+      // NixOS and Nix store executables, shared libraries, and profile symlink targets
+      "/nix",
+      "~/.local/share/nix",
+      "~/.local/state/nix",
+      "~/.nix-profile",
+
+      // User-installed CLI binaries (e.g. ~/.local/bin/agy)
+      "~/.local/bin",
+
+      // Antigravity (agy) configuration and skills
+      "~/.gemini",
+
+      // Read-only VCS and GitHub CLI configuration (enables jj/git identity, credential
+      // helpers, and gh PR/Actions debugging without allowing config tampering)
+      "~/.config/gh",
+      "~/.config/git",
+      "~/.config/jj",
+      "~/.gitconfig",
+      "~/.jjconfig.toml",
+      "~/.local/state/gh",
+      "~/.ssh/known_hosts",
+
+      // Read-only direnv configuration and allow-list database so `direnv exec .` can
+      // verify authorized .envrc files without allowing the agent to authorize new ones
+      "~/.config/direnv",
+      "~/.local/share/direnv",
+
+      // Toolchain installations and caches (read-only for binaries/configs)
+      "~/.cache",
+      "~/.cargo",
+      "~/.rustup",
+
+      // macOS system preferences compatibility
+      "~/Library/Preferences",
+    ],
+
+    "denyRead": [
+      "~/.aws/**",
+      "~/.cargo/credentials",
+      "~/.cargo/credentials.toml",
+      "~/.config/gcloud/**",
+      "~/.docker/**",
+      "~/.git-credentials",
+      "~/.gnupg/**",
+      "~/.kube/**",
+      "~/.netrc",
+      "~/.npmrc",
+      "~/.pypirc",
+      "~/.ssh/*.pem",
+      "~/.ssh/config",
+      "~/.ssh/id_*",
+    ],
 
     "allowWrite": [
-      // Current project directory
+      // Current workspace directory
       ".",
 
+      // Sandbox-private /tmp (isolated tmpfs on Linux) so mktemp and nix-direnv work
+      "/tmp",
+
       // Jujutsu and Git repository stores: workspaces live in .workspaces/<name>,
-      // so jj operations must write to the local working copy state (.jj/**, .git/**)
+      // so VCS operations must write to the local working copy state (.jj/**, .git/**)
       // and the main repository store (../../.jj/**, ../../.git/**).
       "../../.git/**",
       "../../.jj/**",
       ".git/**",
       ".jj/**",
 
-      // Subdirectory where aiw provisions isolated Jujutsu workspaces
+      // Subdirectory where aiw provisions isolated workspaces
       ".workspaces/**",
 
       // Antigravity (agy) configuration, conversation transcripts, and cache
+      "~/.gemini",
       "~/.gemini/**",
 
-      // OS keyring access for credential storage during agent authentication
+      // OS keyring access for credential storage during agy and gh authentication
+      "~/.local/share/keyrings",
       "~/.local/share/keyrings/**",
+
+      // Non-executable build and package caches
+      "~/.cache",
+      "~/.cache/**",
+      "~/.cargo/.package-cache",
+      "~/.cargo/git",
+      "~/.cargo/git/**",
+      "~/.cargo/registry",
+      "~/.cargo/registry/**",
+      "~/.npm/_cacache",
+      "~/.npm/_cacache/**",
+      "~/.npm/_npx",
+      "~/.npm/_npx/**",
+    ],
+
+    "denyWrite": [
+      // Prevent modifying sandbox policy or direnv scripts from inside the sandbox
+      "../../.envrc",
+      "../../fence.json",
+      "../../fence.jsonc",
+      "**/.env",
+      "**/.env.*",
+      "**/.envrc",
+      "fence.json",
+      "fence.jsonc",
+
+      // Prevent planting Git hooks inside writable VCS metadata directories
+      "../../.git/hooks",
+      "../../.git/hooks/**",
+      "../../.jj/repo/store/git/hooks",
+      "../../.jj/repo/store/git/hooks/**",
+      ".git/hooks",
+      ".git/hooks/**",
+      ".jj/repo/store/git/hooks",
+      ".jj/repo/store/git/hooks/**",
+
+      // Prevent overwriting private keys and certificates
+      "**/*.key",
+      "**/*.p12",
+      "**/*.pem",
+      "**/*.pfx",
     ],
   },
 
   "network": {
-    // Block outbound connections to localhost/loopback to prevent agents from
-    // communicating with or bypassing unauthenticated local services.
+    // Allow binding local ports inside the sandbox for dev servers and test suites,
+    // while blocking outbound connections to unauthenticated host localhost services.
+    "allowLocalBinding": true,
     "allowLocalOutbound": false,
 
-    // Specific endpoints required by Google Antigravity (agy). Broad wildcards
-    // such as "*.googleusercontent.com" (which hosts arbitrary user-uploaded content)
-    // and "*.google.com" are deliberately omitted to avoid prompt-injection
-    // data exfiltration or payload retrieval. Avatar CDN hosts (lh*.googleusercontent.com)
-    // are explicitly enumerated for user profile picture fetching.
+    "deniedDomains": [
+      "*.sentry.io",
+      "169.254.169.254",
+      "instance-data.ec2.internal",
+      "metadata.google.internal",
+    ],
+
+    // Scoped to Google Antigravity (agy), GitHub (git/jj push + gh PR & Actions debugging),
+    // and standard package registries. Broad multi-tenant cloud wildcards (such as
+    // *.amazonaws.com and *.googleusercontent.com) and unrelated LLM APIs are omitted
+    // to limit prompt-injection exfiltration or payload retrieval.
     "allowedDomains": [
+      // Google Antigravity (agy) & authentication
       "accounts.google.com",
       "aicode.googleapis.com",
       "aiplatform.googleapis.com",
       "cloudcode-pa.googleapis.com",
       "daily-cloudcode-pa.googleapis.com",
+      "generativelanguage.googleapis.com",
       "lh1.googleusercontent.com",
       "lh2.googleusercontent.com",
       "lh3.googleusercontent.com",
@@ -67,7 +212,28 @@
       "lh6.googleusercontent.com",
       "oauth2.googleapis.com",
       "www.googleapis.com",
-      // Note: generativelanguage.googleapis.com is already included in "code" template
+
+      // GitHub & gh CLI (push, PRs, releases, API, and Actions workflow logs)
+      "*.actions.githubusercontent.com",
+      "api.github.com",
+      "codeload.github.com",
+      "github.com",
+      "objects.githubusercontent.com",
+      "raw.githubusercontent.com",
+      "release-assets.githubusercontent.com",
+      "uploads.github.com",
+
+      // Standard open-source package registries (Rust, Node, Python, Go)
+      "*.npmjs.org",
+      "crates.io",
+      "files.pythonhosted.org",
+      "index.crates.io",
+      "proxy.golang.org",
+      "pypi.org",
+      "registry.npmjs.org",
+      "registry.yarnpkg.com",
+      "static.crates.io",
+      "sum.golang.org",
     ],
   },
 }

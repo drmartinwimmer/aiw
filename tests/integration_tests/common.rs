@@ -84,44 +84,7 @@ pub fn init_test_jj_repo(path: &Path) {
 pub fn write_test_fence_json(repo_root: &Path) {
     let tpl_dir = repo_root.join("templates");
     std::fs::create_dir_all(&tpl_dir).expect("create templates dir");
-    let tpl_content = r#"{
-  "$schema": "https://raw.githubusercontent.com/fencesandbox/fence/main/docs/schema/fence.schema.json",
-  "command": {
-    "acceptSharedBinaryCannotRuntimeDeny": ["chroot"]
-  },
-  "extends": "code",
-  "filesystem": {
-    "allowWrite": [
-      ".",
-      "../../.git/**",
-      "../../.jj/**",
-      ".git/**",
-      ".jj/**",
-      ".workspaces/**",
-      "~/.gemini/**",
-      "~/.local/share/**",
-      "~/.local/share/keyrings/**"
-    ]
-  },
-  "network": {
-    "allowLocalOutbound": false,
-    "allowedDomains": [
-      "accounts.google.com",
-      "aicode.googleapis.com",
-      "aiplatform.googleapis.com",
-      "cloudcode-pa.googleapis.com",
-      "daily-cloudcode-pa.googleapis.com",
-      "lh1.googleusercontent.com",
-      "lh2.googleusercontent.com",
-      "lh3.googleusercontent.com",
-      "lh4.googleusercontent.com",
-      "lh5.googleusercontent.com",
-      "lh6.googleusercontent.com",
-      "oauth2.googleapis.com",
-      "www.googleapis.com"
-    ]
-  }
-}"#;
+    let tpl_content = include_str!("../../templates/fence.jsonc");
     std::fs::write(tpl_dir.join("fence.jsonc"), tpl_content).expect("write templates/fence.jsonc");
 
     let fence_content = r#"{

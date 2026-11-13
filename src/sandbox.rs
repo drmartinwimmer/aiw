@@ -93,14 +93,18 @@ impl<'a> SandboxBuilder<'a> {
         self
     }
 
+    pub(crate) fn has_settings(&self) -> bool {
+        self.resolve_settings_path().is_some()
+    }
+
     fn resolve_settings_path(&self) -> Option<PathBuf> {
         self.settings_path
             .filter(|p| p.exists())
             .map(Path::to_path_buf)
             .or_else(|| {
+                // Only resolve project settings from the read-only repository root, never from
+                // the agent-writable `.workspaces/<name>` directory.
                 [
-                    self.workspace_path.join("fence.jsonc"),
-                    self.workspace_path.join("fence.json"),
                     self.repo_root.join("fence.jsonc"),
                     self.repo_root.join("fence.json"),
                 ]
@@ -158,7 +162,7 @@ impl<'a> SandboxBuilder<'a> {
             return Err(SandboxError::FenceNotFound);
         }
 
-        Ok(self.fence_command().to_std_command())
+        Ok(self.fence_command().to_sanitized_std_command())
     }
 
     /// Executes fence synchronously, forwarding standard I/O.
@@ -168,11 +172,15 @@ impl<'a> SandboxBuilder<'a> {
             return Err(SandboxError::FenceNotFound);
         }
 
-        self.fence_command().run().map_err(|err| match err {
-            CommandError::ProgramNotFound(_) => SandboxError::FenceNotFound,
-            CommandError::ExecutionFailed { status, .. } => SandboxError::ExecutionFailed(status),
-            CommandError::Io(io_err) => SandboxError::Io(io_err),
-        })
+        self.fence_command()
+            .run_sanitized()
+            .map_err(|err| match err {
+                CommandError::ProgramNotFound(_) => SandboxError::FenceNotFound,
+                CommandError::ExecutionFailed { status, .. } => {
+                    SandboxError::ExecutionFailed(status)
+                }
+                CommandError::Io(io_err) => SandboxError::Io(io_err),
+            })
     }
 
     #[cfg(test)]
@@ -240,23 +248,42 @@ mod tests {
     }
 
     #[googletest::test]
-    fn build_args_with_fence_jsonc_in_workspace_takes_precedence_over_repo_root() -> TestResult {
+    fn build_args_ignores_fence_jsonc_inside_agent_writable_workspace() -> TestResult {
         let temp_dir = tempfile::tempdir()?;
         let repo_root = temp_dir.path().join("repo");
         let workspace_path = repo_root.join(".workspaces").join("ws");
+        let shared_dir = temp_dir.path().join("shared");
         std::fs::create_dir_all(&workspace_path)?;
+        std::fs::create_dir_all(&shared_dir)?;
 
         let root_fence = repo_root.join("fence.json");
-        std::fs::write(&root_fence, r#"{"extends": "code"}"#)?;
+        std::fs::write(&root_fence, r#"{"allowPty": true}"#)?;
         let ws_fence = workspace_path.join("fence.jsonc");
-        std::fs::write(&ws_fence, r#"{"extends": "code"}"#)?;
+        std::fs::write(&ws_fence, r#"{"allowPty": true}"#)?;
 
         let cmd = vec!["agy".to_string()];
         let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd);
         let args = builder.build_args()?;
 
-        let ws_fence_str = ws_fence.display().to_string();
-        expect_that!(&args[..], contains_subslice(&["--settings", &ws_fence_str]));
+        let root_fence_str = root_fence.display().to_string();
+        expect_that!(
+            &args[..],
+            contains_subslice(&["--settings", &root_fence_str])
+        );
+
+        // Even when no repo root config exists, workspace config must be ignored in favor of shared template.
+        std::fs::remove_file(&root_fence)?;
+        let shared_template = shared_dir.join("fence.jsonc");
+        std::fs::write(&shared_template, r#"{"allowPty": true}"#)?;
+
+        let builder_no_root = SandboxBuilder::new(&workspace_path, &repo_root, &cmd)
+            .with_shared_config_dir(shared_dir);
+        let args_no_root = builder_no_root.build_args()?;
+        let shared_str = shared_template.display().to_string();
+        expect_that!(
+            &args_no_root[..],
+            contains_subslice(&["--settings", &shared_str])
+        );
         Ok(())
     }
 
@@ -315,7 +342,7 @@ mod tests {
         let shared_template = shared_dir.join("fence.jsonc");
         std::fs::write(&shared_template, r#"{"extends": "code"}"#)?;
 
-        let local_fence = workspace_path.join("fence.jsonc");
+        let local_fence = repo_root.join("fence.jsonc");
         std::fs::write(&local_fence, r#"{"extends": "code"}"#)?;
 
         let cmd = vec!["agy".to_string()];
@@ -453,6 +480,37 @@ mod tests {
             &formatted,
             contains_substring("direnv exec . agy --dangerously-skip-permissions --extra-flag")
         );
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn build_command_scrubs_host_multiplexer_env_vars() -> TestResult {
+        let temp_dir = tempfile::tempdir()?;
+        let repo_root = temp_dir.path().join("repo");
+        let workspace_path = repo_root.join(".workspaces").join("ws");
+        std::fs::create_dir_all(&workspace_path)?;
+
+        let cmd_payload = vec!["agy".to_string()];
+        let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd_payload);
+        let cmd = builder.build_command()?;
+
+        let removed_vars: Vec<&OsStr> = cmd
+            .get_envs()
+            .filter_map(|(k, v)| v.is_none().then_some(k))
+            .collect();
+
+        for expected in [
+            "HC_TERMINAL_ID",
+            "HC_TERMINAL_SOCKET",
+            "HERDR_ENV",
+            "HERDR_SOCKET_PATH",
+            "TMUX",
+            "ZELLIJ",
+            "KITTY_LISTEN_ON",
+            "WEZTERM_UNIX_SOCKET",
+        ] {
+            expect_that!(removed_vars, contains(eq(&OsStr::new(expected))));
+        }
         Ok(())
     }
 }

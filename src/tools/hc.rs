@@ -59,15 +59,6 @@ enum HcSubcommand {
     },
 }
 
-#[derive(Command, Debug)]
-#[command(program = "sh", arg = "-c", ensure_user_path)]
-struct ShCommand {
-    #[command(current_dir)]
-    current_dir: Option<PathBuf>,
-
-    command: String,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum HcError {
     #[error("herdr-core (hc) binary not found: {0}")]
@@ -523,58 +514,50 @@ impl Hc {
         }
     }
 
-    fn execute_in_place(&self, command: &str, cwd: Option<&Path>) -> Result<(), HcError> {
-        ShCommand {
-            current_dir: cwd.map(Path::to_path_buf),
-            command: command.to_string(),
-        }
-        .run()
-        .map_err(|err| match err {
-            CommandError::ExecutionFailed { status, .. } => HcError::CommandFailed {
-                command: command.to_string(),
-                code: status.code(),
-                stderr: String::new(),
-            },
-            other => HcError::from(other),
-        })
-    }
-
     /// Decides how to run `command` based on the current `herdr-core` / Herdr space context
     /// and executes it:
     ///
     /// - If already inside the terminal or Herdr tab for `workspace_name`: labels the terminal
-    ///   with agent metadata and runs `command` in place.
+    ///   with agent metadata and runs `in_place` directly without shell round-tripping.
     /// - If another live terminal for `workspace_name` already exists: ensures it has a tab in
     ///   the current Herdr space when inside one, or attaches to it in headless `hc`.
     /// - Otherwise: spawns a new independent `--rm` terminal named after `workspace_name` and
     ///   adds it as a named tab in the Herdr space's `"herdr-app"` layout document (or attaches
     ///   to it in headless `hc`).
-    pub(crate) fn run_command(
+    pub(crate) fn run_with_in_place<F, E>(
         &self,
         workspace_name: &str,
         command: &str,
         agent: &str,
         cwd: Option<&Path>,
-    ) -> Result<(), HcError> {
+        in_place: F,
+    ) -> Result<(), E>
+    where
+        F: FnOnce() -> Result<(), E>,
+        E: From<HcError>,
+    {
         let caller = self.get_terminal(&self.terminal_id).ok();
         let space_ctx = self.herdr_space_context(caller.as_ref());
         let current_tab_name = space_ctx.as_ref().and_then(|ctx| ctx.tab_name.as_deref());
 
         if Self::is_caller_for_workspace(caller.as_ref(), current_tab_name, workspace_name) {
             self.inform_agent(&self.terminal_id, workspace_name, agent)?;
-            self.execute_in_place(command, cwd)
+            in_place()
         } else if let Some(existing_address) = self.find_live_workspace_terminal(workspace_name)? {
             if let Some(ref ctx) = space_ctx {
-                self.place_terminal_in_herdr_space(ctx, workspace_name, &existing_address, true)
+                self.place_terminal_in_herdr_space(ctx, workspace_name, &existing_address, true)?;
             } else {
-                self.attach_terminal(&existing_address)
+                self.attach_terminal(&existing_address)?;
             }
+            Ok(())
         } else if let Some(ref ctx) = space_ctx {
             let address = self.create_terminal(workspace_name, command, agent, cwd, true)?;
-            self.place_terminal_in_herdr_space(ctx, workspace_name, &address, false)
+            self.place_terminal_in_herdr_space(ctx, workspace_name, &address, false)?;
+            Ok(())
         } else {
             let address = self.create_terminal(workspace_name, command, agent, cwd, false)?;
-            self.attach_spawned_terminal(&address)
+            self.attach_spawned_terminal(&address)?;
+            Ok(())
         }
     }
 }
@@ -670,61 +653,99 @@ mod tests {
     }
 
     #[googletest::test]
-    fn run_command_creates_and_attaches_when_headless() -> TestResult {
+    fn run_with_in_place_creates_and_attaches_when_headless() {
         let hc = mock_hc("t1");
-        let res = hc.run_command(
+        let mut ran_in_place = false;
+        let res = hc.run_with_in_place::<_, HcError>(
             "ws-test",
             "fence -- echo 1",
             "agy",
             Some(Path::new("/tmp/test")),
+            || {
+                ran_in_place = true;
+                Ok(())
+            },
         );
         expect_that!(res, ok(anything()));
-        Ok(())
+        expect_that!(ran_in_place, is_false());
     }
 
     #[googletest::test]
-    fn run_command_opens_tab_in_herdr_space_doc_when_inside_herdr_space() -> TestResult {
+    fn run_with_in_place_opens_tab_in_herdr_space_doc_when_inside_herdr_space() {
         let hc = mock_hc("t2");
-        let res = hc.run_command(
+        let mut ran_in_place = false;
+        let res = hc.run_with_in_place::<_, HcError>(
             "ws-test",
             "fence -- echo 1",
             "agy",
             Some(Path::new("/tmp/test")),
+            || {
+                ran_in_place = true;
+                Ok(())
+            },
         );
         expect_that!(res, ok(anything()));
-        Ok(())
+        expect_that!(ran_in_place, is_false());
     }
 
     #[googletest::test]
-    fn run_command_places_existing_terminal_in_herdr_space_doc() -> TestResult {
+    fn run_with_in_place_places_existing_terminal_in_herdr_space_doc() {
         let hc = mock_hc("t2");
-        let res = hc.run_command("existing-ws", "fence -- echo 1", "agy", None);
+        let mut ran_in_place = false;
+        let res = hc.run_with_in_place::<_, HcError>(
+            "existing-ws",
+            "fence -- echo 1",
+            "agy",
+            None,
+            || {
+                ran_in_place = true;
+                Ok(())
+            },
+        );
         expect_that!(res, ok(anything()));
-        Ok(())
+        expect_that!(ran_in_place, is_false());
     }
 
     #[googletest::test]
-    fn run_command_runs_in_place_when_in_matching_herdr_space_tab() -> TestResult {
+    fn run_with_in_place_runs_closure_when_in_matching_herdr_space_tab() {
         let hc = mock_hc("t6");
-        let res = hc.run_command("desktop-tab-ws", "true", "agy", None);
+        let mut ran_in_place = false;
+        let res = hc.run_with_in_place::<_, HcError>("desktop-tab-ws", "true", "agy", None, || {
+            ran_in_place = true;
+            Ok(())
+        });
         expect_that!(res, ok(anything()));
-        Ok(())
+        expect_that!(ran_in_place, is_true());
     }
 
     #[googletest::test]
-    fn run_command_attaches_to_existing_live_terminal_when_headless() -> TestResult {
+    fn run_with_in_place_attaches_to_existing_live_terminal_when_headless() {
         let hc = mock_hc("t1");
-        let res = hc.run_command("existing-ws", "fence -- echo 1", "agy", None);
+        let mut ran_in_place = false;
+        let res = hc.run_with_in_place::<_, HcError>(
+            "existing-ws",
+            "fence -- echo 1",
+            "agy",
+            None,
+            || {
+                ran_in_place = true;
+                Ok(())
+            },
+        );
         expect_that!(res, ok(anything()));
-        Ok(())
+        expect_that!(ran_in_place, is_false());
     }
 
     #[googletest::test]
-    fn run_command_runs_in_place_when_already_in_workspace_terminal() -> TestResult {
+    fn run_with_in_place_runs_closure_when_already_in_workspace_terminal() {
         let hc = mock_hc("t5");
-        let res = hc.run_command("ws-current", "true", "agy", None);
+        let mut ran_in_place = false;
+        let res = hc.run_with_in_place::<_, HcError>("ws-current", "true", "agy", None, || {
+            ran_in_place = true;
+            Ok(())
+        });
         expect_that!(res, ok(anything()));
-        Ok(())
+        expect_that!(ran_in_place, is_true());
     }
 
     #[googletest::test]

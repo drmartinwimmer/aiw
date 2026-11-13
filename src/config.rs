@@ -24,6 +24,15 @@ impl ConfigInitializer {
         ProjectDirs::from("", "", "aiw").map(|proj| proj.config_dir().join("fence.jsonc"))
     }
 
+    /// Ensures the user configuration (`~/.config/aiw/fence.jsonc`) exists on disk,
+    /// writing the embedded hardened template if not yet present.
+    pub(crate) fn ensure_user_config() -> Result<PathBuf, ConfigInitError> {
+        match Self::init_user_config(false) {
+            Ok(path) | Err(ConfigInitError::AlreadyExists(path)) => Ok(path),
+            Err(err) => Err(err),
+        }
+    }
+
     /// Initializes user configuration (~/.config/aiw/fence.jsonc) if it does not exist yet (or if force is true).
     pub fn init_user_config(force: bool) -> Result<PathBuf, ConfigInitError> {
         let path = Self::user_config_path().ok_or(ConfigInitError::UserConfigPathNotFound)?;
@@ -93,16 +102,41 @@ mod tests {
     use googletest::prelude::*;
 
     #[googletest::test]
-    fn default_aiw_template_contains_schema_and_extends() {
+    fn default_aiw_template_enforces_hardened_standalone_policy() {
         expect_that!(
             DEFAULT_AIW_TEMPLATE,
             contains_substring("fence.schema.json")
         );
         expect_that!(
             DEFAULT_AIW_TEMPLATE,
-            contains_substring("\"extends\": \"code\"")
+            contains_substring("\"defaultDenyRead\": true")
         );
         expect_that!(DEFAULT_AIW_TEMPLATE, contains_substring("\"/nix\""));
+        expect_that!(DEFAULT_AIW_TEMPLATE, contains_substring("\"/tmp\""));
+        expect_that!(
+            DEFAULT_AIW_TEMPLATE,
+            contains_substring("\"api.github.com\"")
+        );
+        expect_that!(
+            DEFAULT_AIW_TEMPLATE,
+            contains_substring("\"generativelanguage.googleapis.com\"")
+        );
+        expect_that!(
+            DEFAULT_AIW_TEMPLATE,
+            contains_substring("\"../../.git/hooks\"")
+        );
+        expect_that!(
+            DEFAULT_AIW_TEMPLATE,
+            not(contains_substring("\"extends\": \"code\""))
+        );
+        expect_that!(
+            DEFAULT_AIW_TEMPLATE,
+            not(contains_substring("\"~/.config/**\""))
+        );
+        expect_that!(
+            DEFAULT_AIW_TEMPLATE,
+            not(contains_substring("\"*.amazonaws.com\""))
+        );
     }
 
     #[googletest::test]

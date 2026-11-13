@@ -102,7 +102,7 @@ This command:
 
 - Checks for an existing workspace named `feature-login` or provisions `.workspaces/feature-login` using `jj workspace add` (in Jujutsu repositories) or `git worktree add` (in Git repositories).
 - Authorizes and activates `direnv` if active in the repository root.
-- Wraps the agent inside `fence` using root or workspace settings.
+- Wraps the agent inside `fence` using trusted settings from the repository root or user/system configuration (never from inside the agent-writable workspace directory), scrubbing host multiplexer environment variables before spawn.
 - Automatically handles terminal/tab creation, attachment, and agent metadata if running inside `herdr-core` (`hc`) or Herdr.
 
 ### 2. Dry Run Mode
@@ -203,18 +203,19 @@ When installed via Nix, shell completions are automatically packaged in `$out/sh
 
 ### 1. Global AI Workspace Template (`fence.jsonc`)
 
-The base template defines rules common to all `aiw` workspaces (inheriting from Fence's built-in `code` template). It resides in your user configuration directory at `~/.config/aiw/fence.jsonc` (or system/package share at `<data_dir>/aiw/fence.jsonc`):
+The base template defines a standalone, default-deny-read Fence policy tailored for `aiw` workspaces. It resides in your user configuration directory at `~/.config/aiw/fence.jsonc` (or system/package share at `<data_dir>/aiw/fence.jsonc`):
 
 ```bash
 aiw config init user
 ```
 
-_(When installing via Nix/Home Manager, it is installed in `$out/share/aiw/fence.jsonc` and discovered via `$XDG_DATA_DIRS`. When installing via `cargo install`, run `aiw config init user` to place it in `~/.config/aiw/fence.jsonc`.)_
+_(When installing via Nix/Home Manager, it is installed in `$out/share/aiw/fence.jsonc` and discovered via `$XDG_DATA_DIRS`. When installing via `cargo install`, `aiw agy` automatically bootstraps `~/.config/aiw/fence.jsonc` on first run if no project or system config exists, or you can initialize it explicitly with `aiw config init user`.)_
 
-- **Zero-Config Workspaces**: When no `fence.jsonc` or `fence.json` exists in the local workspace or repository root, `aiw` automatically discovers and defaults to `fence.jsonc` in `~/.config/aiw/fence.jsonc` (or `$XDG_DATA_DIRS/aiw/fence.jsonc`) and passes it to Fence.
-- **Hardened Agent Scope**: Extends Fence's baseline `code` template while explicitly restricting network access to essential Google agent and authentication endpoints (`accounts.google.com`, `aicode.googleapis.com`, `aiplatform.googleapis.com`, `cloudcode-pa.googleapis.com`, `daily-cloudcode-pa.googleapis.com`, `lh1..lh6.googleusercontent.com`, `oauth2.googleapis.com`, `www.googleapis.com`) without opening broad wildcards.
-- **Jujutsu & Git Workspace Paths**: Grants write access to `.jj/**` and `.git/**` in the active workspace, as well as `../../.jj/**` and `../../.git/**` at the repository root where Jujutsu/Git stores live.
-- **Credential & State Persistence**: Preserves Antigravity agent transcripts and cache in `~/.gemini/**` and keyring credentials in `~/.local/share/keyrings/**`.
+- **Zero-Config Workspaces**: When no `fence.jsonc` or `fence.json` exists in the repository root, `aiw` discovers `~/.config/aiw/fence.jsonc` (or `$XDG_DATA_DIRS/aiw/fence.jsonc`), initializing the hardened user template automatically if needed so `fence` never launches without `aiw`'s policy.
+- **Default-Deny Host Reads & Writes**: Sets `"defaultDenyRead": true` without inheriting broad `allowWrite` globs (`~/.config/**`, `~/.local/share/**`) from Fence's general-purpose `code` template. Only explicit toolchain, Nix, VCS, `direnv`, `gh`, and `~/.gemini` paths are mounted into the sandbox, while SSH private keys, cloud credentials, and package publish tokens remain blocked.
+- **Persistence & Escape Prevention**: Write-protects `.git/hooks`, `.jj/repo/store/git/hooks`, `.envrc`, and `fence.jsonc` at both the workspace and repository root, mounts `~/.config/direnv`, `~/.local/share/direnv`, `~/.config/git`, `~/.config/jj`, and `~/.config/gh` read-only, and blocks multiplexer escape binaries (`hc`, `herdr`, `tmux`, `zellij`).
+- **GitHub CLI (`gh`) & Package Registry Access**: Restricts outbound network access (`allowLocalOutbound: false`) to Google Antigravity/Gemini endpoints, GitHub (`github.com`, `api.github.com`, `*.actions.githubusercontent.com`, raw/object/release hosts), and standard package registries (`crates.io`, `npmjs`, `pypi`, `golang`), enabling `git`/`jj` pushes, PR creation, and CI log debugging via `gh` while denying destructive repository/secret admin subcommands.
+- **Jujutsu, Git & `direnv` Support**: Grants write access to `.jj/**` and `.git/**` (excluding hooks), sets `$TMPDIR` to the workspace alongside a private `tmpfs` `/tmp` so `mktemp` and `nix-direnv` work seamlessly, and preserves Antigravity state in `~/.gemini/**` and keyring credentials in `~/.local/share/keyrings/**`.
 
 ### 2. Project-Specific Overrides (`fence.jsonc`)
 

@@ -2,6 +2,7 @@ use super::common::{
     init_test_git_repo, init_test_jj_repo, run_aiw, run_aiw_with_env, write_test_fence_json,
 };
 use googletest::prelude::*;
+use std::path::Path;
 use std::process::Command;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -29,6 +30,75 @@ fn workspace_without_fence_json_defaults_to_shared_template() -> TestResult {
     let expected_tpl = aiw_dir.join("fence.jsonc").to_string_lossy().to_string();
     let expected_arg = format!("--settings {expected_tpl}");
     expect_that!(stdout.as_ref(), contains_substring(expected_arg.as_ref()));
+    Ok(())
+}
+
+#[googletest::test]
+fn workspace_without_any_config_bootstraps_hardened_user_template() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
+    let repo_root = temp_dir.path().join("repo");
+    init_test_jj_repo(&repo_root);
+
+    let empty_config = temp_dir.path().join("empty-config");
+    let empty_data = temp_dir.path().join("empty-data");
+    std::fs::create_dir_all(&empty_config)?;
+    std::fs::create_dir_all(&empty_data)?;
+
+    let bootstrapped = empty_config.join("aiw").join("fence.jsonc");
+    expect_that!(bootstrapped.exists(), is_false());
+
+    let output = Command::new(env!("CARGO_BIN_EXE_aiw"))
+        .args(["agy", "zero-cfg-ws", "--dry-run"])
+        .current_dir(&repo_root)
+        .env_remove("HERDR_ENV")
+        .env_remove("HC_TERMINAL_ID")
+        .env("XDG_CONFIG_HOME", &empty_config)
+        .env("XDG_DATA_DIRS", &empty_data)
+        .output()?;
+
+    expect_that!(output.status.success(), is_true());
+    if !Path::new("/usr/local/share/aiw/fence.jsonc").exists()
+        && !Path::new("/usr/share/aiw/fence.jsonc").exists()
+    {
+        expect_that!(bootstrapped.exists(), is_true());
+        let content = std::fs::read_to_string(&bootstrapped)?;
+        expect_that!(&content, contains_substring("\"defaultDenyRead\": true"));
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let expected_arg = format!("--settings {}", bootstrapped.display());
+        expect_that!(stdout.as_ref(), contains_substring(expected_arg.as_ref()));
+    }
+    Ok(())
+}
+
+#[googletest::test]
+fn workspace_fence_jsonc_inside_agent_writable_dir_is_ignored() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
+    let repo_root = temp_dir.path().join("repo");
+    init_test_jj_repo(&repo_root);
+    write_test_fence_json(&repo_root);
+
+    // Create the workspace first, then plant an untrusted fence.jsonc inside it.
+    let init_out = run_aiw(&repo_root, &["agy", "evil-ws", "--dry-run"]);
+    expect_that!(init_out.status.success(), is_true());
+
+    let ws_fence = repo_root
+        .join(".workspaces")
+        .join("evil-ws")
+        .join("fence.jsonc");
+    std::fs::write(&ws_fence, r#"{"allowPty": true}"#)?;
+
+    let second_out = run_aiw(&repo_root, &["agy", "evil-ws", "--dry-run"]);
+    expect_that!(second_out.status.success(), is_true());
+    let stdout = String::from_utf8_lossy(&second_out.stdout);
+
+    let root_fence_arg = format!("--settings {}", repo_root.join("fence.jsonc").display());
+    let ws_fence_arg = format!("--settings {}", ws_fence.display());
+    expect_that!(stdout.as_ref(), contains_substring(root_fence_arg.as_ref()));
+    expect_that!(
+        stdout.as_ref(),
+        not(contains_substring(ws_fence_arg.as_ref()))
+    );
     Ok(())
 }
 
