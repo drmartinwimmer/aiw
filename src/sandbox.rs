@@ -10,11 +10,14 @@ use crate::tools::{DirenvExecCommand, FenceCommand};
 use crate::workspace::Workspace;
 
 #[derive(Debug, Clone, Copy)]
-struct PayloadCommand<'a>(&'a [String]);
+struct PayloadCommand<'a> {
+    workspace_path: &'a Path,
+    args: &'a [String],
+}
 
 impl ToArgs for PayloadCommand<'_> {
     fn append_args(&self, args: &mut Vec<OsString>) {
-        if let Some((_program, rest)) = self.0.split_first() {
+        if let Some((_program, rest)) = self.args.split_first() {
             args.extend(rest.iter().map(OsString::from));
         }
     }
@@ -22,9 +25,20 @@ impl ToArgs for PayloadCommand<'_> {
 
 impl clapback::Command for PayloadCommand<'_> {
     fn program(&self) -> &OsStr {
-        self.0.first().map_or_else(|| OsStr::new(""), OsStr::new)
+        self.args.first().map_or_else(|| OsStr::new(""), OsStr::new)
+    }
+
+    fn current_dir_path(&self) -> Option<&Path> {
+        Some(self.workspace_path)
+    }
+
+    fn ensure_user_path(&self) -> bool {
+        true
     }
 }
+
+type InnerCommand<'a> = EitherCommand<DirenvExecCommand<PayloadCommand<'a>>, PayloadCommand<'a>>;
+type ConfiguredCommand<'a> = EitherCommand<FenceCommand<InnerCommand<'a>>, InnerCommand<'a>>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SandboxError {
@@ -45,6 +59,7 @@ pub struct SandboxBuilder<'a> {
     command: &'a [String],
     settings_path: Option<&'a Path>,
     use_direnv: bool,
+    fence: bool,
     #[cfg(test)]
     shared_config_dir: Option<PathBuf>,
 }
@@ -59,6 +74,7 @@ impl<'a> SandboxBuilder<'a> {
             command,
             settings_path: None,
             use_direnv: false,
+            fence: true,
             #[cfg(test)]
             shared_config_dir: None,
         }
@@ -82,6 +98,13 @@ impl<'a> SandboxBuilder<'a> {
     #[must_use]
     pub fn with_direnv(mut self, use_direnv: bool) -> Self {
         self.use_direnv = use_direnv;
+        self
+    }
+
+    /// Configures whether the payload command is wrapped inside `fence` (defaults to `true`).
+    #[must_use]
+    pub fn with_fence(mut self, fence: bool) -> Self {
+        self.fence = fence;
         self
     }
 
@@ -143,44 +166,52 @@ impl<'a> SandboxBuilder<'a> {
         }
     }
 
-    fn fence_command(
-        &self,
-    ) -> FenceCommand<EitherCommand<DirenvExecCommand<PayloadCommand<'a>>, PayloadCommand<'a>>>
-    {
-        PayloadCommand(self.command)
-            .wrap_if(self.use_direnv, DirenvExecCommand::dot)
-            .wrap_with(|cmd| FenceCommand {
-                workspace_path: self.workspace_path.to_path_buf(),
-                settings: self.resolve_settings_path(),
-                command: cmd,
-            })
+    fn configured_command(&self) -> ConfiguredCommand<'a> {
+        PayloadCommand {
+            workspace_path: self.workspace_path,
+            args: self.command,
+        }
+        .wrap_if(self.use_direnv, DirenvExecCommand::dot)
+        .wrap_if(self.fence, |cmd| FenceCommand {
+            workspace_path: self.workspace_path.to_path_buf(),
+            settings: self.resolve_settings_path(),
+            command: cmd,
+        })
     }
 
-    /// Builds the `std::process::Command` prepared to execute fence.
+    /// Builds the `std::process::Command` prepared to execute fence (or the direct payload when fence is disabled).
     pub fn build_command(&self) -> Result<Command, SandboxError> {
-        if which::which("fence").is_err() {
+        if self.fence && which::which("fence").is_err() {
             return Err(SandboxError::FenceNotFound);
         }
 
-        Ok(self.fence_command().to_sanitized_std_command())
+        Ok(match self.configured_command() {
+            EitherCommand::Left(fence_cmd) => fence_cmd.to_sanitized_std_command(),
+            EitherCommand::Right(direct_cmd) => direct_cmd.to_std_command(),
+        })
     }
 
-    /// Executes fence synchronously, forwarding standard I/O.
+    /// Executes fence (or the direct payload when fence is disabled) synchronously, forwarding standard I/O.
     /// Returns `Ok(())` on success, or `Err(SandboxError::ExecutionFailed)` if the command exited with a non-zero status.
     pub fn run(&self) -> Result<(), SandboxError> {
-        if which::which("fence").is_err() {
+        if self.fence && which::which("fence").is_err() {
             return Err(SandboxError::FenceNotFound);
         }
 
-        self.fence_command()
-            .run_sanitized()
-            .map_err(|err| match err {
-                CommandError::ProgramNotFound(_) => SandboxError::FenceNotFound,
-                CommandError::ExecutionFailed { status, .. } => {
-                    SandboxError::ExecutionFailed(status)
-                }
-                CommandError::Io(io_err) => SandboxError::Io(io_err),
-            })
+        let result = match self.configured_command() {
+            EitherCommand::Left(fence_cmd) => fence_cmd.run_sanitized(),
+            EitherCommand::Right(direct_cmd) => direct_cmd.run(),
+        };
+
+        result.map_err(|err| match err {
+            CommandError::ProgramNotFound(_) if self.fence => SandboxError::FenceNotFound,
+            CommandError::ProgramNotFound(program) => SandboxError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Executable '{program}' not found in PATH"),
+            )),
+            CommandError::ExecutionFailed { status, .. } => SandboxError::ExecutionFailed(status),
+            CommandError::Io(io_err) => SandboxError::Io(io_err),
+        })
     }
 
     #[cfg(test)]
@@ -195,7 +226,7 @@ impl<'a> SandboxBuilder<'a> {
 
 impl std::fmt::Display for SandboxBuilder<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.fence_command())
+        write!(f, "{}", self.configured_command())
     }
 }
 
@@ -482,7 +513,6 @@ mod tests {
         );
         Ok(())
     }
-
     #[googletest::test]
     fn build_command_scrubs_host_multiplexer_env_vars() -> TestResult {
         let temp_dir = tempfile::tempdir()?;
@@ -511,6 +541,88 @@ mod tests {
         ] {
             expect_that!(removed_vars, contains(eq(&OsStr::new(expected))));
         }
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn with_fence_false_builds_direct_payload_command_in_workspace_cwd() -> TestResult {
+        let temp_dir = tempfile::tempdir()?;
+        let repo_root = temp_dir.path().join("repo");
+        let workspace_path = repo_root.join(".workspaces").join("ws");
+        std::fs::create_dir_all(&workspace_path)?;
+
+        let fence_json = repo_root.join("fence.jsonc");
+        std::fs::write(&fence_json, r#"{"extends": "code"}"#)?;
+
+        let cmd_payload = vec![
+            "agy".to_string(),
+            "--model".to_string(),
+            "gemini-2.5".to_string(),
+        ];
+        let builder =
+            SandboxBuilder::new(&workspace_path, &repo_root, &cmd_payload).with_fence(false);
+
+        let cmd = builder.build_command()?;
+        expect_that!(cmd.get_program(), eq("agy"));
+        expect_that!(cmd.get_current_dir(), some(eq(&workspace_path)));
+        let args = builder.build_args()?;
+        expect_that!(&args[..], elements_are![eq("--model"), eq("gemini-2.5")]);
+
+        let tmpdir_env = cmd.get_envs().find(|(k, _)| *k == OsStr::new("TMPDIR"));
+        expect_that!(tmpdir_env, none());
+        expect_that!(format!("{builder}"), eq("agy --model gemini-2.5"));
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn with_fence_false_and_direnv_true_wraps_payload_in_direnv_exec() -> TestResult {
+        let temp_dir = tempfile::tempdir()?;
+        let repo_root = temp_dir.path().join("repo");
+        let workspace_path = repo_root.join(".workspaces").join("ws");
+        std::fs::create_dir_all(&workspace_path)?;
+
+        let cmd_payload = vec!["agy".to_string()];
+        let builder = SandboxBuilder::new(&workspace_path, &repo_root, &cmd_payload)
+            .with_direnv(true)
+            .with_fence(false);
+
+        let cmd = builder.build_command()?;
+        expect_that!(cmd.get_program(), eq("direnv"));
+        expect_that!(cmd.get_current_dir(), some(eq(&workspace_path)));
+        let args = builder.build_args()?;
+        expect_that!(&args[..], elements_are![eq("exec"), eq("."), eq("agy")]);
+        expect_that!(format!("{builder}"), eq("direnv exec . agy"));
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn run_with_fence_false_executes_command_and_reports_missing_binary_cleanly() -> TestResult {
+        let temp_dir = tempfile::tempdir()?;
+        let repo_root = temp_dir.path().join("repo");
+        let workspace_path = repo_root.join(".workspaces").join("ws");
+        std::fs::create_dir_all(&workspace_path)?;
+
+        let marker = workspace_path.join("ran.txt");
+        let ok_payload = vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            "printf ok > ran.txt".to_string(),
+        ];
+        let ok_builder =
+            SandboxBuilder::new(&workspace_path, &repo_root, &ok_payload).with_fence(false);
+        expect_that!(ok_builder.run(), ok(anything()));
+        expect_that!(std::fs::read_to_string(&marker)?, eq("ok"));
+
+        let missing_payload = vec!["/nonexistent/aiw-test-binary".to_string()];
+        let missing_builder =
+            SandboxBuilder::new(&workspace_path, &repo_root, &missing_payload).with_fence(false);
+        let res = missing_builder.run();
+        expect_that!(
+            res,
+            err(matches_pattern!(SandboxError::Io(predicate(
+                |e: &std::io::Error| e.kind() == std::io::ErrorKind::NotFound
+            ))))
+        );
         Ok(())
     }
 }

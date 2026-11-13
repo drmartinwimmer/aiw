@@ -306,6 +306,7 @@ fn dynamic_completion_for_agy_in_git_repo_completes_workspaces() -> TestResult {
     expect_that!(stdout.as_ref(), contains_substring("git-feat1\n"));
     expect_that!(stdout.as_ref(), contains_substring("git-feat2\n"));
     expect_that!(stdout.as_ref(), contains_substring("--dry-run\n"));
+    expect_that!(stdout.as_ref(), contains_substring("--fence\n"));
     Ok(())
 }
 
@@ -320,5 +321,86 @@ fn dynamic_completion_outside_repo_succeeds_gracefully() -> TestResult {
         &["--", "aiw", "forget", ""],
     );
     expect_that!(comp_output.status.success(), is_true());
+    Ok(())
+}
+
+#[googletest::test]
+fn fence_false_dry_run_omits_fence_and_permissive_flag() -> TestResult {
+    let temp_dir = tempfile::tempdir()?;
+    let repo_root = temp_dir.path();
+    init_test_jj_repo(repo_root);
+    write_test_fence_json(repo_root);
+
+    let out_global_before = run_aiw(
+        repo_root,
+        &["--fence", "false", "agy", "fenceless-ws", "--dry-run"],
+    );
+    expect_that!(out_global_before.status.success(), is_true());
+    let stdout_before = String::from_utf8_lossy(&out_global_before.stdout);
+    expect_that!(stdout_before.trim(), eq("agy"));
+
+    let out_after = run_aiw(
+        repo_root,
+        &[
+            "agy",
+            "fenceless-ws",
+            "--fence=false",
+            "--dry-run",
+            "--",
+            "--model",
+            "gemini-2.5",
+        ],
+    );
+    expect_that!(out_after.status.success(), is_true());
+    let stdout_after = String::from_utf8_lossy(&out_after.stdout);
+    expect_that!(stdout_after.trim(), eq("agy --model gemini-2.5"));
+    Ok(())
+}
+
+#[googletest::test]
+fn fence_false_executes_agent_directly_in_workspace_without_permissive_flag() -> TestResult {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let temp_dir = tempfile::tempdir()?;
+    let home_dir = temp_dir.path().join("home");
+    std::fs::create_dir_all(&home_dir)?;
+    let repo_root = temp_dir.path().join("repo");
+    init_test_jj_repo(&repo_root);
+
+    let bin_dir = temp_dir.path().join("bin");
+    std::fs::create_dir_all(&bin_dir)?;
+    let mock_agy = bin_dir.join("agy");
+    std::fs::write(
+        &mock_agy,
+        "#!/bin/sh\necho \"CWD=$PWD\"\necho \"ARGS=$*\"\n",
+    )?;
+    std::fs::set_permissions(&mock_agy, std::fs::Permissions::from_mode(0o755))?;
+
+    let orig_path = std::env::var("PATH").unwrap_or_default();
+    let test_path = format!("{}:{orig_path}", bin_dir.display());
+    let home_str = home_dir.to_string_lossy().into_owned();
+
+    let output = run_aiw_with_env(
+        &repo_root,
+        &[("PATH", &test_path), ("HOME", &home_str)],
+        &["--fence", "false", "agy", "direct-ws", "--", "--verbose"],
+    );
+    expect_that!(output.status.success(), is_true());
+
+    let ws_path = repo_root.join(".workspaces").join("direct-ws");
+    let canonical_ws = ws_path.canonicalize().unwrap_or_else(|_| ws_path.clone());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    expect_that!(
+        stdout.as_ref(),
+        predicate(|s: &str| {
+            s.contains(&format!("CWD={}", canonical_ws.display()))
+                || s.contains(&format!("CWD={}", ws_path.display()))
+        })
+    );
+    expect_that!(stdout.as_ref(), contains_substring("ARGS=--verbose\n"));
+    expect_that!(
+        stdout.as_ref(),
+        not(contains_substring("--dangerously-skip-permissions"))
+    );
     Ok(())
 }

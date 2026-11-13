@@ -127,7 +127,19 @@ Pass additional flags to the underlying agent CLI after `--`:
 aiw agy feature-login -- --model gemini-2.5-pro --verbose
 ```
 
-### 4. Forget / Clean Up a Workspace
+### 4. Run Without Fence (`--fence false`)
+
+For workflows requiring host privileges or resources that are too dangerous to expose broadly in `fence.jsonc` (such as container daemons, host sockets, or privileged system operations), pass `--fence false` (or `--fence=false`):
+
+```bash
+aiw --fence false agy feature-infra
+# Or after the subcommand:
+aiw agy feature-infra --fence=false
+```
+
+When `--fence false` is set, `aiw` still provisions the isolated VCS workspace, activates `direnv`, and integrates with `hc` / `herdr`, but executes the agent directly without `fence` and omits `--dangerously-skip-permissions` so the agent prompts interactively before executing sensitive actions.
+
+### 5. Forget / Clean Up a Workspace
 
 When work in a workspace is completed and merged, forget and delete it:
 
@@ -137,7 +149,7 @@ aiw forget <workspace-name>
 
 This cleans up the workspace registration (`jj workspace forget` for Jujutsu or `git worktree remove` for Git) and removes `.workspaces/<workspace-name>` from disk.
 
-### 5. List Available Workspaces
+### 6. List Available Workspaces
 
 To list all currently provisioned workspaces in the repository:
 
@@ -151,7 +163,7 @@ This displays all active workspaces located under `.workspaces/` (one per line).
 aiw ls
 ```
 
-### 6. Initialize Configuration
+### 7. Initialize Configuration
 
 To initialize starter configuration files:
 
@@ -172,7 +184,7 @@ This command:
 
 Pass `--force` (or `-f`) to overwrite existing files.
 
-### 7. Shell Completion
+### 8. Shell Completion
 
 `aiw` supports shell completion with dynamic workspace name resolution for `aiw forget` and `aiw agy`, as well as full completion for subcommands and flags.
 

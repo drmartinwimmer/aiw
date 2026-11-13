@@ -1,4 +1,6 @@
-use super::common::{can_run_fence, init_test_jj_repo, run_aiw, write_test_fence_json};
+use super::common::{
+    can_run_fence, init_test_jj_repo, run_aiw, run_aiw_with_env, write_test_fence_json,
+};
 use aiw::{Direnv, SandboxBuilder, Workspace};
 use googletest::prelude::*;
 use std::path::Path;
@@ -296,5 +298,86 @@ fn direnv_prepended_to_command_iff_allowed() -> TestResult {
         not(contains_substring("direnv exec ."))
     );
     expect_that!(stdout_no_rc.as_ref(), contains_substring("agy"));
+    Ok(())
+}
+
+#[googletest::test]
+fn fence_false_with_allowed_direnv_runs_direnv_exec_directly_in_workspace() -> TestResult {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    if which::which("direnv").is_err() {
+        eprintln!(
+            "Skipping fence_false_with_allowed_direnv_runs_direnv_exec_directly_in_workspace: direnv not found"
+        );
+        return Ok(());
+    }
+
+    let temp_dir = tempfile::tempdir()?;
+    let home_dir = temp_dir.path().join("home");
+    std::fs::create_dir_all(&home_dir)?;
+    let repo_root = temp_dir.path().join("repo");
+    init_test_jj_repo(&repo_root);
+
+    let bin_dir = temp_dir.path().join("bin");
+    std::fs::create_dir_all(&bin_dir)?;
+    let mock_agy = bin_dir.join("agy");
+    std::fs::write(
+        &mock_agy,
+        "#!/bin/sh\necho \"VAL=$AIW_FENCELESS_DIRENV\"\necho \"ARGS=$*\"\n",
+    )?;
+    std::fs::set_permissions(&mock_agy, std::fs::Permissions::from_mode(0o755))?;
+
+    std::fs::write(
+        repo_root.join(".envrc"),
+        format!(
+            "export PATH=\"{}:$PATH\"\nexport AIW_FENCELESS_DIRENV=loaded_ok\n",
+            bin_dir.display()
+        ),
+    )?;
+    let commit_status = Command::new("jj")
+        .args(["--no-pager", "commit", "-m", "add envrc"])
+        .current_dir(&repo_root)
+        .status()?;
+    expect_that!(commit_status.success(), is_true());
+
+    let allow_out = Command::new("direnv")
+        .args(["allow"])
+        .current_dir(&repo_root)
+        .env("HOME", &home_dir)
+        .output()?;
+    expect_that!(allow_out.status.success(), is_true());
+
+    let home_str = home_dir.to_string_lossy().into_owned();
+    let dry_out = run_aiw_with_env(
+        &repo_root,
+        &[("HOME", &home_str)],
+        &["--fence", "false", "agy", "fenceless-env", "--dry-run"],
+    );
+    expect_that!(dry_out.status.success(), is_true());
+    expect_that!(
+        String::from_utf8_lossy(&dry_out.stdout).trim(),
+        eq("direnv exec . agy")
+    );
+
+    let orig_path = std::env::var("PATH").unwrap_or_default();
+    let test_path = format!("{}:{orig_path}", bin_dir.display());
+    let exec_out = Command::new(env!("CARGO_BIN_EXE_aiw"))
+        .args(["--fence=false", "agy", "fenceless-env"])
+        .current_dir(&repo_root)
+        .env_remove("HERDR_ENV")
+        .env_remove("HC_TERMINAL_ID")
+        .env_remove("HC_TERMINAL_SOCKET")
+        .env_remove("HC_SCOPE")
+        .env_remove("DIRENV_DIR")
+        .env_remove("DIRENV_DIFF")
+        .env_remove("DIRENV_WATCHES")
+        .env_remove("DIRENV_FILE")
+        .env("HOME", &home_dir)
+        .env("PATH", &test_path)
+        .output()?;
+    expect_that!(exec_out.status.success(), is_true());
+    let stdout = String::from_utf8_lossy(&exec_out.stdout);
+    expect_that!(stdout.as_ref(), contains_substring("VAL=loaded_ok\n"));
+    expect_that!(stdout.as_ref(), contains_substring("ARGS=\n"));
     Ok(())
 }

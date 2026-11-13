@@ -34,6 +34,10 @@ case "$*" in
         echo '{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"w1:p10","tab_id":"w1:t10","workspace_id":"w1"},"tab":{"label":"my-herdr-ws","tab_id":"w1:t10","workspace_id":"w1"},"type":"tab_created"}}'
         exit 0
         ;;
+    "tab create --label my-fenceless-herdr-ws --focus --cwd "*" --workspace w1")
+        echo '{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"w1:p10","tab_id":"w1:t10","workspace_id":"w1"},"tab":{"label":"my-fenceless-herdr-ws","tab_id":"w1:t10","workspace_id":"w1"},"type":"tab_created"}}'
+        exit 0
+        ;;
     "pane report-agent --source aiw --agent agy --state working w1:p99" | \
     "pane report-agent --source aiw --agent agy --state working w1:p12" | \
     "pane report-agent --source aiw --agent agy --state working w1:p5" | \
@@ -43,6 +47,7 @@ case "$*" in
         ;;
     "pane run w1:p55 echo hello world" | \
     "pane run w1:p12 fence -- echo 1; exit" | \
+    "pane run w1:p10 agy; exit" | \
     "pane run w1:p10 fence "*"agy --dangerously-skip-permissions; exit")
         echo '{"id":"cli:pane:run","result":{"type":"ok"}}'
         exit 0
