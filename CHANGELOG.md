@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0](https://github.com/drmartinwimmer/aiw/compare/ai-workspace-v0.6.0...ai-workspace-v0.7.0) (2026-11-13)
+
+
+### Features
+
+* add global --fence flag to support unsandboxed non-permissive launches ([#49](https://github.com/drmartinwimmer/aiw/issues/49)) ([9a8b64a](https://github.com/drmartinwimmer/aiw/commit/9a8b64a738d657680f9d8254d08537c9c6ad4063))
+* harden Fence sandbox policy and workspace launch isolation ([#46](https://github.com/drmartinwimmer/aiw/issues/46)) ([00eb0df](https://github.com/drmartinwimmer/aiw/commit/00eb0df1c27a3169081af32a94190a180f6a6b2e))
+
 ## [0.6.0](https://github.com/drmartinwimmer/aiw/compare/ai-workspace-v0.5.0...ai-workspace-v0.6.0) (2026-11-12)
 
 
