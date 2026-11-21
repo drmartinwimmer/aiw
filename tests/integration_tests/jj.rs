@@ -1,6 +1,7 @@
 use super::common::{can_run_fence, init_test_jj_repo, run_aiw, write_test_fence_json};
 use aiw::{Direnv, SandboxBuilder, Workspace};
 use googletest::prelude::*;
+use std::path::Path;
 use std::process::Command;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -164,6 +165,81 @@ fn jj_commands_in_fence_sandbox_execute_successfully_and_persist_commits() -> Te
     expect_that!(
         log_stdout.as_ref(),
         contains_substring("commit from inside fence")
+    );
+
+    // Fence runtime artifacts (seccomp BPF filters, proxy sockets) must NOT land in the
+    // workspace root where jj would snapshot them.
+    expect_that!(ws_path.join("fence-seccomp").exists(), is_false());
+    let final_status = Command::new("jj")
+        .args(["--no-pager", "status"])
+        .current_dir(ws_path)
+        .output()?;
+    expect_that!(final_status.status.success(), is_true());
+    expect_that!(
+        String::from_utf8_lossy(&final_status.stdout).as_ref(),
+        contains_substring("The working copy has no changes")
+    );
+    Ok(())
+}
+
+#[googletest::test]
+fn fence_sandbox_blocks_writes_to_vcs_config_and_info_files() -> TestResult {
+    if !can_run_fence() || which::which("jj").is_err() {
+        eprintln!(
+            "Skipping fence_sandbox_blocks_writes_to_vcs_config_and_info_files: fence sandbox or jj unavailable in this environment"
+        );
+        return Ok(());
+    }
+
+    let temp_dir = tempfile::tempdir()?;
+    let repo_root = temp_dir.path();
+    init_test_jj_repo(repo_root);
+    write_test_fence_json(repo_root);
+
+    // Ensure repo-level config files exist so read-only bind mounts protect them on Linux.
+    let jj_config = repo_root.join(".jj").join("repo").join("config.toml");
+    std::fs::write(&jj_config, "# original jj config\n")?;
+
+    let colocated_git_config = repo_root.join(".git").join("config");
+    let internal_git_config = repo_root
+        .join(".jj")
+        .join("repo")
+        .join("store")
+        .join("git")
+        .join("config");
+    let (git_config_path, rel_git_config) = if colocated_git_config.exists() {
+        (colocated_git_config, "../../.git/config")
+    } else {
+        (internal_git_config, "../../.jj/repo/store/git/config")
+    };
+    let original_git_config = std::fs::read_to_string(&git_config_path)?;
+
+    let ws = Workspace::new(repo_root, "config-guard-ws")?;
+    ws.ensure()?;
+    let ws_path = ws.path();
+
+    let sh_bin = if Path::new("/bin/sh").exists() {
+        "/bin/sh"
+    } else {
+        "sh"
+    };
+    let attempt_cmd = vec![
+        sh_bin.into(),
+        "-c".into(),
+        format!("echo polluted >> ../../.jj/repo/config.toml || echo polluted >> {rel_git_config}"),
+    ];
+    let builder = SandboxBuilder::new(ws_path, repo_root, &attempt_cmd);
+    let mut cmd = builder.build_command()?;
+    let output = cmd.output()?;
+
+    expect_that!(output.status.success(), is_false());
+    expect_that!(
+        &std::fs::read_to_string(&jj_config)?,
+        eq("# original jj config\n")
+    );
+    expect_that!(
+        &std::fs::read_to_string(&git_config_path)?,
+        eq(&original_git_config)
     );
     Ok(())
 }

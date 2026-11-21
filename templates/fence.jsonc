@@ -52,6 +52,10 @@
   "filesystem": {
     "defaultDenyRead": true,
 
+    // Explicitly disallow writes to Git configuration files so sandboxed sessions
+    // cannot persist host repo overrides (e.g. core.hooksPath, core.sshCommand).
+    "allowGitConfig": false,
+
     "allowRead": [
       // Active workspace and enclosing repository root (read-only outside .workspaces/<name>)
       ".",
@@ -161,15 +165,37 @@
       "fence.json",
       "fence.jsonc",
 
-      // Prevent planting Git hooks inside writable VCS metadata directories
+      // Prevent planting Git hooks or mutating VCS repository config/info inside writable
+      // VCS metadata directories (writing config files can bypass hook restrictions via
+      // core.hooksPath, core.sshCommand, core.fsmonitor, jj ui.editor/merge-tools, etc.)
+      "../../.git/config",
+      "../../.git/config.worktree",
       "../../.git/hooks",
       "../../.git/hooks/**",
+      "../../.git/info",
+      "../../.git/info/**",
+      "../../.jj/repo/config.toml",
+      "../../.jj/repo/store/git/config",
+      "../../.jj/repo/store/git/config.worktree",
       "../../.jj/repo/store/git/hooks",
       "../../.jj/repo/store/git/hooks/**",
+      "../../.jj/repo/store/git/info",
+      "../../.jj/repo/store/git/info/**",
+      "../../.jj/workspace-config.toml",
+      ".git/config",
+      ".git/config.worktree",
       ".git/hooks",
       ".git/hooks/**",
+      ".git/info",
+      ".git/info/**",
+      ".jj/repo/config.toml",
+      ".jj/repo/store/git/config",
+      ".jj/repo/store/git/config.worktree",
       ".jj/repo/store/git/hooks",
       ".jj/repo/store/git/hooks/**",
+      ".jj/repo/store/git/info",
+      ".jj/repo/store/git/info/**",
+      ".jj/workspace-config.toml",
 
       // Prevent overwriting private keys and certificates
       "**/*.key",
