@@ -30,8 +30,10 @@ pub(crate) const SANITIZED_HOST_ENV_VARS: &[&str] = &[
 #[command(program = "fence", ensure_user_path)]
 pub struct FenceCommand<C: Command> {
     #[command(current_dir)]
-    #[env("TMPDIR")]
     pub workspace_path: PathBuf,
+
+    #[env("TMPDIR")]
+    pub tmp_dir: PathBuf,
 
     #[arg(long)]
     pub settings: Option<PathBuf>,

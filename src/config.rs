@@ -111,6 +111,10 @@ mod tests {
             DEFAULT_AIW_TEMPLATE,
             contains_substring("\"defaultDenyRead\": true")
         );
+        expect_that!(
+            DEFAULT_AIW_TEMPLATE,
+            contains_substring("\"allowGitConfig\": false")
+        );
         expect_that!(DEFAULT_AIW_TEMPLATE, contains_substring("\"/nix\""));
         expect_that!(DEFAULT_AIW_TEMPLATE, contains_substring("\"/tmp\""));
         expect_that!(
@@ -121,10 +125,34 @@ mod tests {
             DEFAULT_AIW_TEMPLATE,
             contains_substring("\"generativelanguage.googleapis.com\"")
         );
-        expect_that!(
-            DEFAULT_AIW_TEMPLATE,
-            contains_substring("\"../../.git/hooks\"")
-        );
+        for protected_vcs_path in [
+            "\"../../.git/config\"",
+            "\"../../.git/config.worktree\"",
+            "\"../../.git/hooks\"",
+            "\"../../.git/info\"",
+            "\"../../.git/info/**\"",
+            "\"../../.jj/repo/config.toml\"",
+            "\"../../.jj/repo/store/git/config\"",
+            "\"../../.jj/repo/store/git/config.worktree\"",
+            "\"../../.jj/repo/store/git/hooks\"",
+            "\"../../.jj/repo/store/git/info\"",
+            "\"../../.jj/repo/store/git/info/**\"",
+            "\"../../.jj/workspace-config.toml\"",
+            "\".git/config\"",
+            "\".git/config.worktree\"",
+            "\".git/hooks\"",
+            "\".git/info\"",
+            "\".git/info/**\"",
+            "\".jj/repo/config.toml\"",
+            "\".jj/repo/store/git/config\"",
+            "\".jj/repo/store/git/config.worktree\"",
+            "\".jj/repo/store/git/hooks\"",
+            "\".jj/repo/store/git/info\"",
+            "\".jj/repo/store/git/info/**\"",
+            "\".jj/workspace-config.toml\"",
+        ] {
+            expect_that!(DEFAULT_AIW_TEMPLATE, contains_substring(protected_vcs_path));
+        }
         expect_that!(
             DEFAULT_AIW_TEMPLATE,
             not(contains_substring("\"extends\": \"code\""))

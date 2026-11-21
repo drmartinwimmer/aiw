@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
 use clapback::{CommandError, CommandExt as _, EitherCommand, ToArgs};
+use tempfile::tempdir;
 
 #[cfg(not(test))]
 use crate::config::ConfigInitializer;
@@ -166,7 +167,7 @@ impl<'a> SandboxBuilder<'a> {
         }
     }
 
-    fn configured_command(&self) -> ConfiguredCommand<'a> {
+    fn configured_command(&self, tmp_dir: PathBuf) -> ConfiguredCommand<'a> {
         PayloadCommand {
             workspace_path: self.workspace_path,
             args: self.command,
@@ -174,6 +175,7 @@ impl<'a> SandboxBuilder<'a> {
         .wrap_if(self.use_direnv, DirenvExecCommand::dot)
         .wrap_if(self.fence, |cmd| FenceCommand {
             workspace_path: self.workspace_path.to_path_buf(),
+            tmp_dir,
             settings: self.resolve_settings_path(),
             command: cmd,
         })
@@ -185,7 +187,13 @@ impl<'a> SandboxBuilder<'a> {
             return Err(SandboxError::FenceNotFound);
         }
 
-        Ok(match self.configured_command() {
+        let tmp_dir = if self.fence {
+            std::env::temp_dir()
+        } else {
+            PathBuf::new()
+        };
+
+        Ok(match self.configured_command(tmp_dir) {
             EitherCommand::Left(fence_cmd) => fence_cmd.to_sanitized_std_command(),
             EitherCommand::Right(direct_cmd) => direct_cmd.to_std_command(),
         })
@@ -198,9 +206,17 @@ impl<'a> SandboxBuilder<'a> {
             return Err(SandboxError::FenceNotFound);
         }
 
-        let result = match self.configured_command() {
-            EitherCommand::Left(fence_cmd) => fence_cmd.run_sanitized(),
-            EitherCommand::Right(direct_cmd) => direct_cmd.run(),
+        let result = if self.fence {
+            let tmp_dir = tempdir()?;
+            match self.configured_command(tmp_dir.path().to_path_buf()) {
+                EitherCommand::Left(fence_cmd) => fence_cmd.run_sanitized(),
+                EitherCommand::Right(direct_cmd) => direct_cmd.run(),
+            }
+        } else {
+            match self.configured_command(PathBuf::new()) {
+                EitherCommand::Left(fence_cmd) => fence_cmd.run_sanitized(),
+                EitherCommand::Right(direct_cmd) => direct_cmd.run(),
+            }
         };
 
         result.map_err(|err| match err {
@@ -226,7 +242,7 @@ impl<'a> SandboxBuilder<'a> {
 
 impl std::fmt::Display for SandboxBuilder<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.configured_command())
+        write!(f, "{}", self.configured_command(PathBuf::new()))
     }
 }
 
@@ -543,7 +559,6 @@ mod tests {
         }
         Ok(())
     }
-
     #[googletest::test]
     fn with_fence_false_builds_direct_payload_command_in_workspace_cwd() -> TestResult {
         let temp_dir = tempfile::tempdir()?;
@@ -623,6 +638,30 @@ mod tests {
                 |e: &std::io::Error| e.kind() == std::io::ErrorKind::NotFound
             ))))
         );
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn build_command_sets_tmpdir_outside_workspace_and_repo() -> TestResult {
+        let temp_dir = tempfile::tempdir()?;
+        let repo_root = temp_dir.path().join("repo");
+        let ws = repo_root.join(".workspaces").join("ws");
+        std::fs::create_dir_all(&ws)?;
+
+        let cmd_payload = vec!["agy".to_string()];
+        let cmd = SandboxBuilder::new(&ws, &repo_root, &cmd_payload).build_command()?;
+
+        let tmpdir = cmd
+            .get_envs()
+            .find_map(|(k, v)| (k == OsStr::new("TMPDIR")).then(|| v.map(PathBuf::from)))
+            .flatten()
+            .ok_or("TMPDIR not set on fence command")?;
+
+        // TMPDIR must be outside both the workspace and enclosing repo so Fence runtime
+        // files (fence-seccomp/*.bpf, fence-*.sock) are never snapshotted by jj/git.
+        expect_that!(tmpdir.starts_with(&ws), is_false());
+        expect_that!(tmpdir.starts_with(&repo_root), is_false());
+        expect_that!(tmpdir.is_dir(), is_true());
         Ok(())
     }
 }
